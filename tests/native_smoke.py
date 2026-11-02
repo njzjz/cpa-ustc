@@ -7,6 +7,7 @@ is offline; an optional real CPA host can perform its own vendor version checks.
 
 import base64
 import ctypes
+from datetime import datetime, timezone
 import http.server
 import json
 import os
@@ -97,6 +98,18 @@ class NativeSmoke(unittest.TestCase):
                 with cls.lock:
                     cls.gateway_accounts.append(self.headers.get("Authorization"))
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                if body["model"] == "json-error-model":
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b'{"error":{"code":"rate_limit_exceeded","retry_after":60,"message":"native-test-key must not leak"}}')
+                    return
+                if any(message.get("content") == "sse-cooldown" for message in body.get("messages", [])):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.end_headers()
+                    self.wfile.write(b'data: {"error":{"code":"rate_limit_exceeded","status":429,"retry_after":60,"message":"native-test-key must not leak"}}\n\n')
+                    return
                 if body["model"] == "error-model":
                     self.send_response(429)
                     self.send_header("Retry-After", "7")
@@ -205,6 +218,12 @@ class NativeSmoke(unittest.TestCase):
         self.assertFalse(error["ok"])
         self.assertEqual(error["error"]["http_status"], 429)
         self.assertEqual(error["error"]["retry_after_seconds"], 7)
+        request["Model"] = "json-error-model"
+        error = self.call("executor.execute", request)
+        self.assertFalse(error["ok"])
+        self.assertEqual(error["error"]["http_status"], 429)
+        self.assertEqual(error["error"]["retry_after_seconds"], 60)
+        self.assertNotIn("native-test-key", json.dumps(error))
         self.assertNotIn("native-test-key", json.dumps(error))
 
     def test_streaming_is_incremental(self):
@@ -380,6 +399,31 @@ class NativeSmoke(unittest.TestCase):
                     stream = response.read()
                 self.assertIn(b"first", stream)
                 self.assertIn(b"[DONE]", stream)
+
+                # Errors inside HTTP 200 SSE must enter CPA's native cooldown path.
+                cooldown_body = {"model": "smoke-model", "stream": True, "messages": [{"role": "user", "content": "sse-cooldown"}]}
+                with self.assertRaises(urllib.error.HTTPError) as rejected:
+                    opener.open(request("/v1/chat/completions", cooldown_body), timeout=5)
+                self.assertEqual(rejected.exception.code, 429)
+                self.assertNotIn(b"native-test-key", rejected.exception.read())
+                with opener.open(request("/v8/management/credentials"), timeout=5) as response:
+                    credentials = json.load(response)["files"]
+                credential = next(entry for entry in credentials if entry["provider"] == "ustc")
+                self.assertTrue(credential["unavailable"])
+                self.assertTrue(credential["status_message"])
+                self.assertTrue(credential["next_retry_after"])
+                retry_time = datetime.fromisoformat(credential["next_retry_after"].replace("Z", "+00:00"))
+                self.assertTrue(45 <= (retry_time - datetime.now(timezone.utc)).total_seconds() <= 65)
+                with opener.open(request("/v0/management/plugins/ustc/accounts"), timeout=5) as response:
+                    account_state = json.load(response)["accounts"][0]
+                self.assertEqual(account_state["status_message"], credential["status_message"])
+                self.assertEqual(account_state["next_retry_after"], credential["next_retry_after"])
+                with self.lock:
+                    calls_before_retry = len(self.gateway_accounts)
+                with self.assertRaises(urllib.error.HTTPError):
+                    opener.open(request("/v1/chat/completions", body), timeout=5)
+                with self.lock:
+                    self.assertEqual(len(self.gateway_accounts), calls_before_retry, "CPA retried a cooling credential")
             finally:
                 self.release_stream.set()
                 process.terminate()

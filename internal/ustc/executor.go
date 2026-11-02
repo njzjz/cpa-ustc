@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"time"
 )
 
@@ -48,11 +47,7 @@ func (service *Service) Execute(ctx context.Context, account Account, model stri
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		response.Body.Close()
 		client.CloseIdleConnections()
-		retry, _ := strconv.Atoi(response.Header.Get("Retry-After"))
-		if retry < 0 {
-			retry = 0
-		}
-		return nil, updated, &StatusError{Status: response.StatusCode, Message: "学校模型网关拒绝请求", RetryAfter: retry}
+		return nil, updated, responseStatusError(response, "学校模型网关拒绝请求")
 	}
 	response.Body = &ownedBody{ReadCloser: response.Body, client: client}
 	return response, updated, nil

@@ -1,4 +1,4 @@
-# USTC Token Plan v0.1.0
+# USTC Token Plan v0.1.1
 
 CLIProxyAPI 原生中科大词元计划提供商插件（`ustc`）。
 
@@ -6,11 +6,13 @@ CLIProxyAPI 原生中科大词元计划提供商插件（`ustc`）。
 - 校园网直连，校外可托管 iWAN；网页支持安装客户端和完成首次登录。
 - 内置网页设置、账号添加及管理；多个账号复用 CPA 原生号池。
 - 支持模型发现、非流式及 SSE 流式推理。
+- 修复 HTTP 200 JSON / SSE 内的错误被当作成功：结构化回传 HTTP 状态和重试间隔，让 CPA 原生记录错误、冷却并切换账号；不建立独立冷却池。
+- 支持 `Retry-After` 秒数及 HTTP 日期，并保留认证、bootstrap、模型发现的重试提示。插件网页显示 CPA 返回的最近错误、暂不可用状态与冷却截止时间。
 
 ## 安装
 
 - 预编译平台：**Linux x86_64 / ARM64、glibc 2.36+**，兼容 CPA 官方 Debian Bookworm 容器；不支持 Alpine / musl。
-- 安装包：`ustc_0.1.0_linux_amd64.zip` 和 `ustc_0.1.0_linux_arm64.zip`，根目录均包含对应架构的 `ustc.so`。
+- 安装包：`ustc_0.1.1_linux_amd64.zip` 和 `ustc_0.1.1_linux_arm64.zip`，根目录均包含对应架构的 `ustc.so`。
 - 两种架构均在原生运行器上构建，执行 Go 竞态检查、原生 ABI 及真实 CPA 宿主集成测试。
 - `checksums.txt` 包含 zip 的 SHA-256；CPA 插件商店会校验摘要。
 - 商店收录前，可添加自定义插件源 `https://raw.githubusercontent.com/njzjz/cpa-ustc/master/registry.json`；收录后直接在官方商店搜索 USTC Token Plan。

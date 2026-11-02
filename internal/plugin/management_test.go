@@ -65,7 +65,7 @@ func TestWebAPIKeyImportsNativeCPAAccountAndRedactsSecrets(t *testing.T) {
 				t.Fatal("not saved as CPA provider credential")
 			}
 		case "host.auth.list":
-			return json.Unmarshal([]byte(`{"files":[{"id":"a","name":"a.json","provider":"ustc","label":"<script>test</script>","api_key":"hidden","path":"/private/host"},{"id":"b","name":"b.json","type":"ustc","disabled":true},{"name":"c.json","provider":"codex"}]}`), result)
+			return json.Unmarshal([]byte(`{"files":[{"id":"a","name":"a.json","provider":"ustc","label":"<script>test</script>","status":"error","status_message":"HTTP 429","unavailable":true,"next_retry_after":"2026-11-02T12:00:00Z","api_key":"hidden","path":"/private/host"},{"id":"b","name":"b.json","type":"ustc","disabled":true},{"name":"c.json","provider":"codex"}]}`), result)
 		default:
 			t.Fatalf("unexpected callback %s", method)
 		}
@@ -84,6 +84,9 @@ func TestWebAPIKeyImportsNativeCPAAccountAndRedactsSecrets(t *testing.T) {
 	}
 	if strings.Contains(string(response.Body), "hidden") || strings.Contains(string(response.Body), "/private/host") {
 		t.Fatal("account list leaked credentials or host paths")
+	}
+	if list.Accounts[0]["status_message"] != "HTTP 429" || list.Accounts[0]["unavailable"] != true || list.Accounts[0]["next_retry_after"] != "2026-11-02T12:00:00Z" {
+		t.Fatalf("CPA cooldown diagnostics lost: %s", response.Body)
 	}
 }
 

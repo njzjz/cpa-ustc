@@ -219,14 +219,17 @@ func (runtime *Runtime) handleManagement(ctx context.Context, service *ustc.Serv
 func (runtime *Runtime) webAccounts(callbackID string) managementResponse {
 	var result struct {
 		Files []struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			Type      string `json:"type"`
-			Provider  string `json:"provider"`
-			Label     string `json:"label"`
-			Status    string `json:"status"`
-			Disabled  bool   `json:"disabled"`
-			AuthIndex string `json:"auth_index"`
+			ID             string `json:"id"`
+			Name           string `json:"name"`
+			Type           string `json:"type"`
+			Provider       string `json:"provider"`
+			Label          string `json:"label"`
+			Status         string `json:"status"`
+			StatusMessage  string `json:"status_message"`
+			Unavailable    bool   `json:"unavailable"`
+			NextRetryAfter string `json:"next_retry_after,omitempty"`
+			Disabled       bool   `json:"disabled"`
+			AuthIndex      string `json:"auth_index"`
 		} `json:"files"`
 	}
 	if runtime.Host == nil || runtime.Host("host.auth.list", map[string]any{"host_callback_id": callbackID}, &result) != nil {

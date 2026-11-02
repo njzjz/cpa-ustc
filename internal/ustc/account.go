@@ -204,7 +204,7 @@ func (service *Service) bootstrap(ctx context.Context, account Account) (Gateway
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
-		return Gateway{}, &StatusError{Status: response.StatusCode, Message: "学校模型配置被拒绝，请检查账号权限或重新登录"}
+		return Gateway{}, responseStatusError(response, "学校模型配置被拒绝，请检查账号权限或重新登录")
 	}
 	var document struct {
 		Provider  string            `json:"inferenceProvider"`
@@ -295,7 +295,7 @@ func (service *Service) Models(ctx context.Context, account Account) ([]Model, A
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
-		return nil, updated, &StatusError{Status: response.StatusCode, Message: "获取模型列表失败"}
+		return nil, updated, responseStatusError(response, "获取模型列表失败")
 	}
 	var list struct {
 		Data []struct {

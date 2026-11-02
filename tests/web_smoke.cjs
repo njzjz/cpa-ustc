@@ -51,6 +51,28 @@ const { chromium } = require(process.env.CPA_USTC_PLAYWRIGHT_MODULE || "playwrig
     await row.getByRole("button", { name: "启用", exact: true }).click();
     await row.getByRole("button", { name: "禁用", exact: true }).waitFor();
 
+    const diagnosticsURL = "**/v0/management/plugins/ustc/accounts";
+    await page.route(diagnosticsURL, async (route) => {
+      const response = await route.fetch();
+      const data = await response.json();
+      const account = data.accounts.find((entry) => entry.label === label);
+      Object.assign(account, {
+        status: "error", unavailable: true,
+        status_message: 'HTTP 429 <img src=x onerror="window.errorInjected=true">',
+        next_retry_after: new Date(Date.now() + 60000).toISOString(),
+      });
+      await route.fulfill({ response, json: data });
+    });
+    await page.getByRole("button", { name: "刷新账号", exact: true }).click();
+    await row.getByText("冷却中", { exact: true }).waitFor();
+    assert((await row.textContent()).includes("HTTP 429 <img"));
+    assert((await row.textContent()).includes("可重试时间："));
+    assert.equal(await row.locator("img").count(), 0);
+    assert.equal(await page.evaluate(() => window.errorInjected), undefined);
+    await page.unroute(diagnosticsURL);
+    await page.getByRole("button", { name: "刷新账号", exact: true }).click();
+    await row.getByRole("button", { name: "禁用", exact: true }).waitFor();
+
     await page.getByRole("button", { name: "登录 / 更新 iWAN", exact: true }).click();
     await page.locator("#iwan-url").waitFor({ state: "visible" });
     assert.match(await page.locator("#iwan-url").getAttribute("href"), /^https:\/\/auth\.ivpn\.ustc\.edu\.cn\//);
@@ -71,7 +93,7 @@ const { chromium } = require(process.env.CPA_USTC_PLAYWRIGHT_MODULE || "playwrig
     await page.getByRole("button", { name: "断开并清除密钥", exact: true }).click();
     assert.equal(await page.locator("#workspace").isHidden(), true);
     assert.deepEqual(errors, []);
-    console.log("Browser acceptance passed: configuration, CPA accounts, native status/delete, iWAN callback, secret handling.");
+    console.log("Browser acceptance passed: configuration, CPA accounts, cooldown diagnostics, native status/delete, iWAN callback, secret handling.");
   } catch (error) {
     console.error("Browser notice:", await page.locator("#notice").textContent());
     console.error("iWAN status:", await page.locator("#iwan-status").textContent());

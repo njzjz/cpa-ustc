@@ -183,6 +183,11 @@ func (runtime *Runtime) Dispatch(method string, data []byte) []byte {
 }
 
 func failure(err error) []byte {
+	raw, _ := json.Marshal(map[string]any{"ok": false, "error": errorDetails(err)})
+	return raw
+}
+
+func errorDetails(err error) map[string]any {
 	status := 500
 	retry := 0
 	var upstream *ustc.StatusError
@@ -190,8 +195,7 @@ func failure(err error) []byte {
 		status = upstream.Status
 		retry = upstream.RetryAfter
 	}
-	raw, _ := json.Marshal(map[string]any{"ok": false, "error": map[string]any{"code": "ustc_error", "message": err.Error(), "http_status": status, "retry_after_seconds": retry, "retryable": status == 429 || status >= 500}})
-	return raw
+	return map[string]any{"code": "ustc_error", "message": err.Error(), "http_status": status, "retry_after_seconds": retry, "retryable": status == 429 || status >= 500}
 }
 
 func (runtime *Runtime) dispatch(method string, request rpcRequest) (any, error) {
@@ -347,6 +351,9 @@ func (runtime *Runtime) execute(parent context.Context, service *ustc.Service, r
 		if readErr != nil || len(body) > 64<<20 {
 			return nil, errors.New("学校模型响应读取失败或超过 64 MiB")
 		}
+		if upstream := ustc.InferenceError(body, response.Header); upstream != nil {
+			return nil, upstream
+		}
 		return map[string]any{"Payload": body, "Headers": safeHeaders(response.Header)}, nil
 	}
 	if !strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
@@ -361,28 +368,21 @@ func (runtime *Runtime) execute(parent context.Context, service *ustc.Service, r
 		defer response.Body.Close()
 		var streamErr error
 		defer func() {
-			message := ""
+			result := map[string]any{"stream_id": request.StreamID, "error": ""}
 			if streamErr != nil {
-				message = "学校模型流中断，请检查校园网/iWAN 或重试"
+				publicErr := error(&ustc.StatusError{Status: 502, Message: "学校模型流中断，请检查校园网/iWAN 或重试"})
+				var upstream *ustc.StatusError
+				if errors.As(streamErr, &upstream) {
+					publicErr = upstream
+				}
+				result["error"] = publicErr.Error()
+				result["error_detail"] = errorDetails(publicErr)
 			}
-			_ = runtime.Host("host.stream.close", map[string]any{"stream_id": request.StreamID, "error": message}, nil)
+			_ = runtime.Host("host.stream.close", result, nil)
 		}()
-		buffer := make([]byte, 32<<10)
-		for {
-			count, readErr := response.Body.Read(buffer)
-			if count > 0 {
-				if emitErr := runtime.Host("host.stream.emit", map[string]any{"stream_id": request.StreamID, "payload": buffer[:count]}, nil); emitErr != nil {
-					streamErr = emitErr
-					return
-				}
-			}
-			if readErr != nil {
-				if !errors.Is(readErr, io.EOF) {
-					streamErr = readErr
-				}
-				return
-			}
-		}
+		streamErr = ustc.RelaySSE(response.Body, response.Header, func(payload []byte) error {
+			return runtime.Host("host.stream.emit", map[string]any{"stream_id": request.StreamID, "payload": payload}, nil)
+		})
 	}()
 	return map[string]any{"headers": safeHeaders(response.Header)}, nil
 }

@@ -59,7 +59,11 @@
     table.replaceChildren();
     for (const account of data.accounts) {
       const row = document.createElement("tr");
-      for (const text of [account.label || account.id, account.name, account.disabled ? "已禁用" : account.status || "就绪"]) {
+      const deadline = account.next_retry_after ? new Date(account.next_retry_after) : null;
+      const cooling = account.unavailable && deadline && Number.isFinite(deadline.getTime()) && deadline > new Date();
+      const status = account.disabled ? "已禁用" : cooling ? "冷却中" : account.unavailable ? "暂不可用" : account.status || "就绪";
+      const retry = deadline && Number.isFinite(deadline.getTime()) ? `可重试时间：${deadline.toLocaleString()}` : "";
+      for (const text of [account.label || account.id, account.name, status, account.status_message || "—", retry || "—"]) {
         const cell = document.createElement("td");
         cell.textContent = text;
         row.append(cell);

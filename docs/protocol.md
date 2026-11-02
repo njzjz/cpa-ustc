@@ -14,6 +14,14 @@
 
 凭据型模型使用 `executor_model_scope: oauth`，其中 `oauth` 是 CPA 的“按 auth 绑定模型”分类；本插件的手动 API Key 也作为单独的 provider auth 文件接入。静态目录为空，真实目录来自该账号。
 
+### 错误与冷却回传
+
+执行失败通过 ABI envelope 的 `error.http_status`、`error.retry_after_seconds` 返回；流式开始后通过 `host.stream.close` 的 `error_detail` 返回相同结构，并保留兼容旧宿主的安全 `error` 文案。由 CPA executor / auth manager 记录结果、错误状态、模型或凭据冷却及故障切换，插件不自行修改 CPA 的调度状态，也不另建冷却池。宿主提供的 `host.routing.reset_cooldown` 用于重置，而不是执行失败时手动设置冷却。
+
+不能仅根据 HTTP 200 判断成功。普通 JSON 中的 `error`、SSE `data` 中的错误封包或 `event: error` 都必须转成结构化失败；SSE 按完整事件识别错误，其余事件保留原字节增量转发，单事件最多 8 MiB。只提取合法状态、已知错误码与重试提示，不返回上游错误文案。`Retry-After` 同时接受秒数和 HTTP 日期，日期转换向上取整。未知错误按 502 回传，不根据任意文案臆造 429。
+
+插件网页的账号列表保留 CPA 原生的 `status_message`、`unavailable`、`next_retry_after`，而不是只显示 `status`。这些是宿主账号汇总；多个模型的可用性与冷却仍由 CPA 自己按模型维护。
+
 插件只声明 OpenAI Chat Completions 输入/输出，ABI 中的规范格式标识是 **`openai`**；`chat-completions` 为宿主接受的别名，调用插件时会被规范化。Anthropic Messages、Responses 等协议由宿主已有 translator 处理；插件不声称学校网关直接支持这些接口。
 
 宿主要求 `GitHubRepository` 非空；默认填写本项目源码仓库 `https://github.com/njzjz/cpa-ustc`，从 fork 构建时可通过 `REPOSITORY` 参数指定对应仓库，不冒充 CPA 或学校官方项目。
@@ -107,10 +115,10 @@ iwan-client-oidc --connect --server <line> --http \
 ## 5. 实测范围
 
 - Go 竞态测试与 `go vet`。
-- 用本地测试 CA 模拟的 HTTPS 模型列表、非流式请求、429 状态及增量 SSE。
+- 用本地测试 CA 模拟的 HTTPS 模型列表、非流式请求、429 状态、HTTP 200 错误封包及增量 SSE；检查 HTTP 日期重试提示、分片 / 未终止错误事件、大小限制和错误文案脱敏。
 - 通过 Python ctypes 真正加载生成的 C ABI 动态库，验证宿主回调、buffer 释放、原生注册和执行。
 - 可指定真实 CPA 可执行文件，对本地模拟网关验证插件加载、账号模型发现、Chat Completions / Responses / Anthropic Messages 转换以及 SSE 转发。
-- 真实 CPA 管理接口验证插件菜单、静态资源、管理鉴权、Key 导入、原生双账号轮询、禁用 / 启用 / 删除和配置热更新。可选 Chromium 验证网页表单、凭据不落浏览器存储、备注 XSS 防护、模拟 iWAN 客户端的完整回调；不启动真实隧道。
+- 真实 CPA 管理接口验证插件菜单、静态资源、管理鉴权、Key 导入、原生双账号轮询、禁用 / 启用 / 删除和配置热更新；HTTP 200 SSE 内的 429 触发 CPA 原生冷却，凭据列表记录错误及截止时间，冷却中请求不再访问上游。可选 Chromium 验证网页表单、错误及冷却显示、凭据不落浏览器存储、备注与错误消息的 XSS 防护、模拟 iWAN 客户端的完整回调；不启动真实隧道。
 - 可选在线检查只访问学校公开签名配置、OIDC discovery 和 netcheck，不涉及账号、额度或推理。
 
 真实 SSO / 校外隧道仍须有权使用服务的用户完成验收。不得把模拟成功描述成真实账号登录或实际学校模型调用成功。

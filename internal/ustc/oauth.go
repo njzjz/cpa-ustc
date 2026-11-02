@@ -142,7 +142,7 @@ func getJSON(ctx context.Context, client *http.Client, target, token string, des
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
-		return &StatusError{Status: response.StatusCode, Message: "学校认证服务请求失败"}
+		return responseStatusError(response, "学校认证服务请求失败")
 	}
 	if json.NewDecoder(io.LimitReader(response.Body, 2<<20)).Decode(destination) != nil {
 		return errors.New("学校认证服务返回无效 JSON")
@@ -353,7 +353,7 @@ func (service *Service) token(ctx context.Context, endpoint string, values url.V
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
-		return tokenResponse{}, &StatusError{Status: response.StatusCode, Message: "科大令牌请求被拒绝，请重新登录"}
+		return tokenResponse{}, responseStatusError(response, "科大令牌请求被拒绝，请重新登录")
 	}
 	var token tokenResponse
 	if json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&token) != nil || token.Access == "" || !strings.EqualFold(token.Type, "bearer") || token.Expires <= 0 || token.Expires > 365*86400 || strings.ContainsAny(token.Access, "\r\n") {
