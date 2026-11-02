@@ -16,7 +16,11 @@
 
 ### 错误与冷却回传
 
-执行失败通过 ABI envelope 的 `error.http_status`、`error.retry_after_seconds` 返回；流式开始后通过 `host.stream.close` 的 `error_detail` 返回相同结构，并保留兼容旧宿主的安全 `error` 文案。由 CPA executor / auth manager 记录结果、错误状态、模型或凭据冷却及故障切换，插件不自行修改 CPA 的调度状态，也不另建冷却池。宿主提供的 `host.routing.reset_cooldown` 用于重置，而不是执行失败时手动设置冷却。
+执行失败通过 ABI envelope 的 `error.http_status`、`error.retry_after_seconds` 返回；流式开始后通过 `host.stream.close` 的 `error_detail` 返回相同结构，并保留兼容旧宿主的安全 `error` 文案。由 CPA executor / auth manager 记录结果、错误状态、冷却及故障切换，插件不自行修改 CPA 的调度状态。宿主提供的 `host.routing.reset_cooldown` 用于重置，而不是执行失败时手动设置冷却。
+
+实测模型网关对预算耗尽返回 HTTP 422，封包为 `error.code: "422"`、`error.type: "budget_exceeded"`，且可能无任何重试提示。只对这种明确的预算标识将 422 规范化为 429，保留实际校验错误的 422。HTTP 200 JSON / SSE 中同样识别。优先上游重试提示，否则使用公开配置 `budget-cooldown`（默认 `30m`，允许 `1s`–`168h`），不臆测学校窗口重置时刻。
+
+该版宿主的 `rpcError` 仅保留状态和重试提示，没有实现 auth manager 识别凭据级错误所需的 `IsCredentialScoped()`；无提示时宿主的 quota backoff 从 1 秒指数增长、最高 30 分钟，选择阶段还有 10 秒下限，不能当成学校预算重置周期。插件因此在现有账号缓存中保留预算截止时间，冷却时阻止该 CPA 凭据跨模型再次请求上游，并回传向上取整的剩余秒数，让 CPA 继续负责选取其他凭据。并发失败复用首个仍有效的窗口，不滑动延长截止时间；普通 429、校验错误和认证错误不触发此全凭据保护。此保护仅存在当前插件实例，重启或配置变更会清除；宿主“重置冷却”只重置宿主调度，不清除此保护，更不重置学校预算。多个凭据即使实际共享学校账户预算，也不会在无法验证关联时被自动合并。
 
 不能仅根据 HTTP 200 判断成功。普通 JSON 中的 `error`、SSE `data` 中的错误封包或 `event: error` 都必须转成结构化失败；SSE 按完整事件识别错误，其余事件保留原字节增量转发，单事件最多 8 MiB。只提取合法状态、已知错误码与重试提示，不返回上游错误文案。`Retry-After` 同时接受秒数和 HTTP 日期，日期转换向上取整。未知错误按 502 回传，不根据任意文案臆造 429。
 

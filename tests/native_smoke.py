@@ -75,6 +75,7 @@ class NativeSmoke(unittest.TestCase):
         cls.first_chunk = threading.Event()
         cls.closed = threading.Event()
         cls.chunks = []
+        cls.stream_error = None
         cls.gateway_accounts = []
         cls.allocations = {}
         cls.lock = threading.Lock()
@@ -89,7 +90,7 @@ class NativeSmoke(unittest.TestCase):
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(b'{"data":[{"id":"smoke-model"}]}')
+                self.wfile.write(b'{"data":[{"id":"smoke-model"},{"id":"smoke-alternate"}]}')
 
             def do_POST(self):
                 if self.headers.get("Authorization") not in {"Bearer native-test-key", "Bearer native-test-key-b"}:
@@ -98,6 +99,26 @@ class NativeSmoke(unittest.TestCase):
                 with cls.lock:
                     cls.gateway_accounts.append(self.headers.get("Authorization"))
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                if body["model"] in {"budget-no-hint-model", "json-budget-model", "sse-budget-model"} or any(message.get("content") == "budget-no-hint" for message in body.get("messages", [])):
+                    stream_error = body["model"] == "sse-budget-model"
+                    self.send_response(200 if body["model"] in {"json-budget-model", "sse-budget-model"} else 422)
+                    self.send_header("Content-Type", "text/event-stream" if stream_error else "application/json")
+                    self.end_headers()
+                    error = b'{"error":{"code":"422","type":"budget_exceeded","message":"native-test-key must not leak"}}'
+                    self.wfile.write(b"data: " + error + b"\n\n" if stream_error else error)
+                    return
+                if body["model"] == "budget-error-model" or any(message.get("content") == "budget-cooldown" for message in body.get("messages", [])):
+                    self.send_response(422)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b'{"error":{"code":"422","type":"budget_exceeded","retry_after":60,"message":"native-test-key must not leak"}}')
+                    return
+                if body["model"] == "validation-error-model" or any(message.get("content") == "validation-error" for message in body.get("messages", [])):
+                    self.send_response(422)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b'{"detail":[{"type":"missing","loc":["body","messages"],"input":"native-test-key must not leak"}]}')
+                    return
                 if body["model"] == "json-error-model":
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
@@ -141,6 +162,8 @@ class NativeSmoke(unittest.TestCase):
                 with cls.lock:
                     cls.chunks.append(base64.b64decode(request["payload"]))
                 cls.first_chunk.set()
+            if method == b"host.stream.close":
+                cls.stream_error = request.get("error_detail")
             result = ctypes.create_string_buffer(b'{"ok":true,"result":{}}')
             address = ctypes.addressof(result)
             with cls.lock:
@@ -196,7 +219,7 @@ class NativeSmoke(unittest.TestCase):
         self.first_chunk.clear()
         self.closed.clear()
         self.chunks.clear()
-        config = f"network: direct\nstate-dir: {self.directory.as_posix()}\n"
+        config = f"network: direct\nstate-dir: {(self.directory / self._testMethodName).as_posix()}\n"
         registration = self.call("plugin.register", {"schema_version": 1, "config_yaml": base64.b64encode(config.encode()).decode()})
         self.assertTrue(registration["ok"], registration)
         self.assertEqual(registration["result"]["capabilities"]["executor_model_scope"], "oauth")
@@ -235,7 +258,50 @@ class NativeSmoke(unittest.TestCase):
         self.assertEqual(error["error"]["http_status"], 429)
         self.assertEqual(error["error"]["retry_after_seconds"], 60)
         self.assertNotIn("native-test-key", json.dumps(error))
+        request["Model"] = "validation-error-model"
+        error = self.call("executor.execute", request)
+        self.assertFalse(error["ok"])
+        self.assertEqual(error["error"]["http_status"], 422)
         self.assertNotIn("native-test-key", json.dumps(error))
+        request["Model"] = "budget-error-model"
+        error = self.call("executor.execute", request)
+        self.assertFalse(error["ok"])
+        self.assertEqual(error["error"]["http_status"], 429)
+        self.assertEqual(error["error"]["retry_after_seconds"], 60)
+        self.assertIn("budget_exceeded", error["error"]["message"])
+        self.assertNotIn("native-test-key", json.dumps(error))
+
+    def test_budget_cooldown_all_envelopes(self):
+        for index, model in enumerate(["budget-no-hint-model", "json-budget-model", "sse-budget-model"]):
+            with self.subTest(model=model):
+                account = {**self.account, "id": f"ustc-budget-{index}"}
+                storage = base64.b64encode(json.dumps(account).encode()).decode()
+                request = {"StorageJSON": storage, "Model": model, "Format": "openai", "Payload": base64.b64encode(b'{"messages":[]}').decode()}
+                self.closed.clear()
+                if model == "sse-budget-model":
+                    result = self.call("executor.execute_stream", {**request, "stream_id": "native-budget"})
+                    self.assertTrue(result["ok"], result)
+                    self.assertTrue(self.closed.wait(3))
+                    error = self.stream_error
+                else:
+                    result = self.call("executor.execute", request)
+                    self.assertFalse(result["ok"], result)
+                    error = result["error"]
+                self.assertEqual(error["http_status"], 429)
+                self.assertEqual(error["retry_after_seconds"], 1800)
+                self.assertNotIn("native-test-key", json.dumps(error))
+                with self.lock:
+                    calls_before = len(self.gateway_accounts)
+                request["Model"] = "smoke-model"
+                blocked = self.call("executor.execute", request)
+                self.assertFalse(blocked["ok"], blocked)
+                self.assertEqual(blocked["error"]["http_status"], 429)
+                self.assertTrue(1795 <= blocked["error"]["retry_after_seconds"] <= 1800)
+                with self.lock:
+                    self.assertEqual(len(self.gateway_accounts), calls_before)
+                models = self.call("model.for_auth", {"StorageJSON": storage})
+                self.assertFalse(models["ok"], models)
+                self.assertEqual(models["error"]["http_status"], 429)
 
     def test_streaming_is_incremental(self):
         result = self.call("executor.execute_stream", {"StorageJSON": self.storage, "Model": "smoke-model", "Format": "chat-completions", "Payload": base64.b64encode(b'{"messages":[]}').decode(), "stream_id": "native-smoke"})
@@ -311,6 +377,7 @@ class NativeSmoke(unittest.TestCase):
                 self.assertTrue(entry["supports_oauth"])
                 self.assertIn("ustc", entry["oauth_providers"])
                 self.assertIn("api-base", [field["name"] for field in entry["config_fields"]])
+                self.assertIn("budget-cooldown", [field["name"] for field in entry["config_fields"]])
                 self.assertEqual(entry["menus"][0]["path"], "/v0/resource/plugins/ustc/settings")
                 for resource, content_type in [("settings", "text/html"), ("settings.js", "application/javascript"), ("settings.css", "text/css")]:
                     with opener.open(request("/v0/resource/plugins/ustc/" + resource, authenticated=False), timeout=5) as response:
@@ -425,30 +492,54 @@ class NativeSmoke(unittest.TestCase):
                 self.assertIn(b"first", stream)
                 self.assertIn(b"[DONE]", stream)
 
-                # Errors inside HTTP 200 SSE must enter CPA's native cooldown path.
-                cooldown_body = {"model": "smoke-model", "stream": True, "messages": [{"role": "user", "content": "sse-cooldown"}]}
-                with self.assertRaises(urllib.error.HTTPError) as rejected:
-                    opener.open(request("/v1/chat/completions", cooldown_body), timeout=5)
-                self.assertEqual(rejected.exception.code, 429)
-                self.assertNotIn(b"native-test-key", rejected.exception.read())
-                with opener.open(request("/v8/management/credentials"), timeout=5) as response:
-                    credentials = json.load(response)["files"]
-                credential = next(entry for entry in credentials if entry["provider"] == "ustc")
-                self.assertTrue(credential["unavailable"])
-                self.assertTrue(credential["status_message"])
-                self.assertTrue(credential["next_retry_after"])
-                retry_time = datetime.fromisoformat(credential["next_retry_after"].replace("Z", "+00:00"))
-                self.assertTrue(45 <= (retry_time - datetime.now(timezone.utc)).total_seconds() <= 65)
-                with opener.open(request("/v0/management/plugins/ustc/accounts"), timeout=5) as response:
-                    account_state = json.load(response)["accounts"][0]
-                self.assertEqual(account_state["status_message"], credential["status_message"])
-                self.assertEqual(account_state["next_retry_after"], credential["next_retry_after"])
-                with self.lock:
-                    calls_before_retry = len(self.gateway_accounts)
-                with self.assertRaises(urllib.error.HTTPError):
-                    opener.open(request("/v1/chat/completions", body), timeout=5)
-                with self.lock:
-                    self.assertEqual(len(self.gateway_accounts), calls_before_retry, "CPA retried a cooling credential")
+                # Genuine request validation remains 422 and must not cool the account.
+                invalid_body = {"model": "smoke-model", "messages": [{"role": "user", "content": "validation-error"}]}
+                with self.assertRaises(urllib.error.HTTPError) as invalid:
+                    opener.open(request("/v1/chat/completions", invalid_body), timeout=5)
+                self.assertEqual(invalid.exception.code, 422)
+                self.assertNotIn(b"native-test-key", invalid.exception.read())
+                with opener.open(request("/v1/chat/completions", body), timeout=5) as response:
+                    response.read()
+
+                # HTTP 200 SSE errors and USTC's HTTP 422 budgets both enter native cooldown.
+                for scenario in ["sse-cooldown", "budget-no-hint"]:
+                    cooldown_body = {"model": "smoke-model", "stream": True, "messages": [{"role": "user", "content": scenario}]}
+                    with self.assertRaises(urllib.error.HTTPError) as rejected:
+                        opener.open(request("/v1/chat/completions", cooldown_body), timeout=5)
+                    self.assertEqual(rejected.exception.code, 429)
+                    self.assertNotIn(b"native-test-key", rejected.exception.read())
+                    with opener.open(request("/v8/management/credentials"), timeout=5) as response:
+                        credentials = json.load(response)["files"]
+                    credential = next(entry for entry in credentials if entry["provider"] == "ustc")
+                    self.assertTrue(credential["unavailable"])
+                    self.assertTrue(credential["status_message"])
+                    self.assertTrue(credential["next_retry_after"])
+                    retry_time = datetime.fromisoformat(credential["next_retry_after"].replace("Z", "+00:00"))
+                    with opener.open(request("/v0/management/plugins/ustc/state"), timeout=5) as response:
+                        cooldown_setting = json.load(response)["config"]["budget-cooldown"]
+                    expected_seconds = 60 if scenario == "sse-cooldown" else {"30m": 1800, "3h": 10800}[cooldown_setting]
+                    self.assertTrue(expected_seconds - 15 <= (retry_time - datetime.now(timezone.utc)).total_seconds() <= expected_seconds + 5)
+                    with opener.open(request("/v0/management/plugins/ustc/accounts"), timeout=5) as response:
+                        account_state = json.load(response)["accounts"][0]
+                    self.assertEqual(account_state["status_message"], credential["status_message"])
+                    self.assertEqual(account_state["next_retry_after"], credential["next_retry_after"])
+                    with self.lock:
+                        calls_before_retry = len(self.gateway_accounts)
+                    with self.assertRaises(urllib.error.HTTPError):
+                        opener.open(request("/v1/chat/completions", body), timeout=5)
+                    with self.lock:
+                        self.assertEqual(len(self.gateway_accounts), calls_before_retry, "CPA retried a cooling credential")
+                    if scenario == "sse-cooldown":
+                        with opener.open(request("/v8/management/routing/cooldown/reset", {"auth_index": credential["auth_index"]}), timeout=5):
+                            pass
+                    else:
+                        alternate = {**body, "model": "smoke-alternate"}
+                        with self.assertRaises(urllib.error.HTTPError) as cross_model:
+                            opener.open(request("/v1/chat/completions", alternate), timeout=5)
+                        self.assertEqual(cross_model.exception.code, 429)
+                        self.assertNotIn(b"native-test-key", cross_model.exception.read())
+                        with self.lock:
+                            self.assertEqual(len(self.gateway_accounts), calls_before_retry, "Changing models bypassed credential budget cooldown")
             finally:
                 self.release_stream.set()
                 process.terminate()

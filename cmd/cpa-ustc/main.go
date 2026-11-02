@@ -60,6 +60,7 @@ func run(arguments []string) error {
 	flags.StringVar(&config.IwanServer, "iwan-server", config.IwanServer, "iWAN 线路名称或序号")
 	flags.StringVar(&config.StateDir, "state-dir", config.StateDir, "公开配置与 iWAN 会话目录")
 	flags.StringVar(&config.APIBase, "api-base", config.APIBase, "直接 API Key 模式的 HTTPS 基础地址")
+	flags.StringVar(&config.BudgetCooldown, "budget-cooldown", config.BudgetCooldown, "预算耗尽且无重试提示时的凭据冷却时长，如 30m、3h")
 	keyEnvironment := flags.String("api-key-env", "", "直接使用此环境变量中的 API Key，不将值写入磁盘")
 	keyStdin := flags.Bool("api-key-stdin", false, "从标准输入读取 API Key，保存到私有凭据文件")
 	installIwan := flags.Bool("install-iwan", false, "下载并校验固定版本的第三方 iWAN 命令行客户端")

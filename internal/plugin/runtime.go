@@ -132,6 +132,7 @@ func (runtime *Runtime) configure(request rpcRequest) (any, error) {
 			{"Name": "state-dir", "Type": "string", "Default": config.StateDir, "Description": "CLI 和插件共享的 iWAN 配置目录"},
 			{"Name": "proxy-url", "Type": "string", "Default": "", "Description": "显式使用已有 HTTP(S)/SOCKS5 代理，优先于自动检测"},
 			{"Name": "api-base", "Type": "string", "Default": ustc.APIBase, "Description": "直接 API Key 账号的 HTTPS API 地址；不影响学校 SSO 下发的网关"},
+			{"Name": "budget-cooldown", "Type": "string", "Default": ustc.DefaultBudgetCooldown, "Description": "budget_exceeded 无上游重试提示时的凭据级冷却，如 30m、3h；不是学校预算重置时间"},
 		}},
 		"capabilities": map[string]any{"auth_provider": true, "model_provider": true, "management_api": true, "quota_provider": true, "executor": true, "executor_model_scope": "oauth", "executor_input_formats": []string{"openai"}, "executor_output_formats": []string{"openai"}},
 	}, nil
@@ -370,7 +371,7 @@ func (runtime *Runtime) execute(parent context.Context, service *ustc.Service, r
 			return nil, errors.New("学校模型响应读取失败或超过 64 MiB")
 		}
 		if upstream := ustc.InferenceError(body, response.Header); upstream != nil {
-			return nil, upstream
+			return nil, service.RecordInferenceError(account, upstream)
 		}
 		return map[string]any{"Payload": body, "Headers": safeHeaders(response.Header)}, nil
 	}
@@ -401,6 +402,7 @@ func (runtime *Runtime) execute(parent context.Context, service *ustc.Service, r
 		streamErr = ustc.RelaySSE(response.Body, response.Header, func(payload []byte) error {
 			return runtime.Host("host.stream.emit", map[string]any{"stream_id": request.StreamID, "payload": payload}, nil)
 		})
+		streamErr = service.RecordInferenceError(account, streamErr)
 	}()
 	return map[string]any{"headers": safeHeaders(response.Header)}, nil
 }

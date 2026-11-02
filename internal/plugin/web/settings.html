@@ -27,6 +27,7 @@
         <label class="wide">状态目录（CPA 服务器上）<input name="state-dir" required></label>
         <label class="wide">现有代理 URL（可选，优先于自动检测）<input name="proxy-url" placeholder="http://127.0.0.1:7890" autocomplete="off"></label>
         <label class="wide">API Key 模式的 HTTPS API 地址<input name="api-base" type="url" required></label>
+        <label class="wide">预算耗尽默认冷却（无上游重试提示时）<input name="budget-cooldown" placeholder="30m" required><span class="muted">例如 30m、3h，范围 1s–168h。同一凭据的所有模型共用保护；不是学校额度实际重置时间。</span></label>
         <div class="actions wide"><button type="submit">保存设置</button><button id="reload-settings" type="button" class="secondary">重新读取</button></div>
       </form>
     </section>

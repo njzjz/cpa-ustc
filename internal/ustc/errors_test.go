@@ -41,6 +41,11 @@ func TestInferenceErrorClassificationAndRedaction(testContext *testing.T) {
 		{"false", `{"error":false}`, 0, 0},
 		{"invalid", `not JSON`, 0, 0},
 		{"quota code", `{"error":{"code":"insufficient_quota","message":"credential-secret","retry_after":2.1}}`, 429, 3},
+		{"USTC budget type beats numeric code", `{"error":{"code":"422","type":"budget_exceeded","message":"credential-secret","retry_after":60}}`, 429, 60},
+		{"USTC budget type beats explicit status", `{"error":{"status":422,"type":"budget_exceeded","message":"credential-secret"}}`, 429, 7},
+		{"USTC budget code", `{"error":{"code":"budget_exceeded","message":"credential-secret"}}`, 429, 7},
+		{"real validation error stays 422", `{"error":{"code":"422","type":"validation_error","message":"credential-secret"}}`, 422, 7},
+		{"explicit authentication status wins over budget type", `{"error":{"status":401,"type":"budget_exceeded","message":"credential-secret"}}`, 401, 7},
 		{"numeric status", `{"error":{"status":429,"retry_after_seconds":60,"message":"credential-secret"}}`, 429, 60},
 		{"numeric code", `{"error":{"code":503}}`, 503, 7},
 		{"string status", `{"error":{"code":"429"},"retry_after":20}`, 429, 20},
@@ -63,6 +68,83 @@ func TestInferenceErrorClassificationAndRedaction(testContext *testing.T) {
 			}
 			if strings.Contains(upstream.Error(), "credential-secret") {
 				testContext.Fatal("upstream message leaked")
+			}
+		})
+	}
+}
+
+func TestModelResponseErrorsRespectHTTPStatusAndBounds(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		status    int
+		body      string
+		want      int
+		wantRetry int
+	}{
+		{"budget", 422, `{"error":{"code":"422","type":"budget_exceeded","message":"credential-secret","retry_after":60}}`, 429, 60},
+		{"rate limit", 429, `{"error":{"retry_after":40,"message":"credential-secret"}}`, 429, 40},
+		{"validation", 422, `{"detail":[{"type":"missing","loc":["body","messages"],"input":"credential-secret"}]}`, 422, 7},
+		{"validation envelope", 422, `{"error":{"code":"422","type":"validation_error","message":"credential-secret"}}`, 422, 7},
+		{"no error envelope", 422, `{"choices":[]}`, 422, 7},
+		{"not JSON", 422, "credential-secret", 422, 7},
+		{"oversized", 422, strings.Repeat(" ", 64<<10) + `{"error":{"type":"budget_exceeded"}}`, 422, 7},
+		{"auth status wins", 401, `{"error":{"code":"422","type":"budget_exceeded","message":"credential-secret"}}`, 401, 7},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := &http.Response{StatusCode: test.status, Header: http.Header{"Retry-After": {"7"}}, Body: io.NopCloser(strings.NewReader(test.body))}
+			upstream := modelResponseError(response, "学校模型网关拒绝请求")
+			if upstream.Status != test.want || upstream.RetryAfter != test.wantRetry || strings.Contains(upstream.Error(), "credential-secret") {
+				t.Fatalf("unsafe or misclassified response: %+v", upstream)
+			}
+		})
+	}
+}
+
+func TestBudgetExhaustionIsQuotaForModelsAndInference(t *testing.T) {
+	for _, budget := range []bool{true, false} {
+		t.Run(map[bool]string{true: "budget", false: "validation"}[budget], func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				writer.Header().Set("Content-Type", "application/json")
+				writer.Header().Set("Retry-After", "7")
+				writer.WriteHeader(422)
+				if budget {
+					_, _ = io.WriteString(writer, `{"error":{"type":"budget_exceeded","code":"422","retry_after":60,"message":"credential-secret"}}`)
+				} else {
+					_, _ = io.WriteString(writer, `{"detail":[{"type":"missing","loc":["body","messages"],"input":"credential-secret"}]}`)
+				}
+			}))
+			defer server.Close()
+			config := DefaultConfig()
+			config.Network, config.APIBase = "direct", server.URL+"/v1"
+			service := NewService(config)
+			defer service.Close()
+			service.apiClient = func(string) *http.Client { return server.Client() }
+			account, err := APIAccount("credential-secret", "", config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, operation := range map[string]func() error{
+				"models": func() error { _, _, err := service.Models(context.Background(), account); return err },
+				"non-streaming": func() error {
+					_, _, err := service.Execute(context.Background(), account, "model", []byte(`{"messages":[]}`), false)
+					return err
+				},
+				"streaming": func() error {
+					_, _, err := service.Execute(context.Background(), account, "model", []byte(`{"messages":[]}`), true)
+					return err
+				},
+			} {
+				t.Run(name, func(t *testing.T) {
+					var upstream *StatusError
+					err := operation()
+					want, retry := 422, 7
+					if budget {
+						want, retry = 429, 60
+					}
+					if !errors.As(err, &upstream) || upstream.Status != want || upstream.RetryAfter != retry || strings.Contains(err.Error(), "credential-secret") {
+						t.Fatalf("budget or validation status lost: %v", err)
+					}
+				})
 			}
 		})
 	}
@@ -118,6 +200,7 @@ func TestRelaySSEPreservesEventsAndReportsErrors(testContext *testing.T) {
 		event string
 	}{
 		{"envelope", "data: {\"error\":{\"code\":\"rate_limit_exceeded\",\"retry_after\":31,\"message\":\"credential-secret\"}}\n\n"},
+		{"budget type", "data: {\"error\":{\"code\":\"422\",\"type\":\"budget_exceeded\",\"retry_after\":31,\"message\":\"credential-secret\"}}\n\n"},
 		{"named event", "event: error\ndata: {\"status\":429,\"retry_after\":31,\"message\":\"credential-secret\"}\n\n"},
 		{"unterminated event", "data: {\"error\":{\"code\":429,\"retry_after\":31}}"},
 	} {

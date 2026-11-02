@@ -102,13 +102,16 @@ func TestWebMutationValidation(t *testing.T) {
 	if response.StatusCode != 400 {
 		t.Fatal("accepted non-JSON form submission")
 	}
-	for _, body := range []string{`{"network":"invalid"}`, `{"api-base":"http://unsafe.test"}`, `{"unknown":"value"}`} {
+	for _, body := range []string{`{"network":"invalid"}`, `{"api-base":"http://unsafe.test"}`, `{"unknown":"value"}`, `{"budget-cooldown":"0s"}`, `{"budget-cooldown":"invalid"}`} {
 		if response := callWeb(t, runtime, "POST", managementPrefix+"validate", body); response.StatusCode != 400 {
 			t.Fatal("accepted invalid settings", body)
 		}
 	}
 	if response := callWeb(t, runtime, "POST", managementPrefix+"validate", `{"network":"direct"}`); response.StatusCode != 200 {
 		t.Fatal("valid partial configuration rejected")
+	}
+	if response := callWeb(t, runtime, "POST", managementPrefix+"validate", `{"budget-cooldown":"3h"}`); response.StatusCode != 200 {
+		t.Fatal("web cooldown configuration rejected")
 	}
 }
 

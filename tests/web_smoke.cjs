@@ -24,6 +24,8 @@ const { chromium } = require(process.env.CPA_USTC_PLAYWRIGHT_MODULE || "playwrig
     assert.equal(await page.locator("#management-key").inputValue(), "");
 
     await page.locator('[name="iwan-server"]').fill("browser-saved-line");
+    assert.equal(await page.locator('[name="budget-cooldown"]').inputValue(), "30m");
+    await page.locator('[name="budget-cooldown"]').fill("3h");
     await page.locator('[name="iwan-binary"]').fill(process.env.CPA_USTC_WEB_IWAN);
     await page.getByRole("button", { name: "保存设置", exact: true }).click();
     await page.waitForFunction(() => document.querySelector("#notice").textContent.includes("设置已保存到 CPA"));
@@ -35,6 +37,7 @@ const { chromium } = require(process.env.CPA_USTC_PLAYWRIGHT_MODULE || "playwrig
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     assert.equal(settings.config["iwan-server"], "browser-saved-line");
+    assert.equal(settings.config["budget-cooldown"], "3h");
 
     const label = 'Browser Account <img src=x onerror="window.injected=true">';
     await page.locator('#key-form [name="label"]').fill(label);

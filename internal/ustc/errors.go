@@ -3,6 +3,7 @@ package ustc
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"math"
 	"net/http"
 	"strconv"
@@ -41,6 +42,28 @@ func responseStatusError(response *http.Response, message string) *StatusError {
 	return &StatusError{Status: response.StatusCode, Message: message, RetryAfter: retryAfterSeconds(response.Header.Get("Retry-After"), time.Now())}
 }
 
+// modelResponseError reads only a bounded error envelope from the model gateway.
+// USTC returns HTTP 422 for budget exhaustion, including GET /models. Normalize
+// that structured quota failure to 429 for CPA, without reclassifying ordinary
+// validation errors or forwarding credential-bearing upstream text.
+func modelResponseError(response *http.Response, message string) *StatusError {
+	result := responseStatusError(response, message)
+	const maxBody = 64 << 10
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxBody+1))
+	if err != nil || len(body) > maxBody {
+		return result
+	}
+	upstream := InferenceError(body, response.Header)
+	if upstream == nil {
+		return result
+	}
+	result.RetryAfter = max(result.RetryAfter, upstream.RetryAfter)
+	if (response.StatusCode == http.StatusUnprocessableEntity || response.StatusCode == http.StatusTooManyRequests) && upstream.Status == http.StatusTooManyRequests {
+		return upstream
+	}
+	return result
+}
+
 func retryJSONSeconds(raw json.RawMessage) int {
 	var text string
 	if json.Unmarshal(raw, &text) == nil {
@@ -74,6 +97,11 @@ func InferenceError(payload []byte, headers http.Header) *StatusError {
 		RetryAfterSeconds json.RawMessage `json:"retry_after_seconds"`
 	}
 	_ = json.Unmarshal(envelope.Error, &detail)
+	var code string
+	if json.Unmarshal(detail.Code, &code) != nil {
+		code = string(detail.Code)
+	}
+	budgetExceeded := strings.EqualFold(code, "budget_exceeded") || strings.EqualFold(detail.Type, "budget_exceeded")
 	status := 0
 	for _, candidate := range []int{detail.Status, detail.StatusCode, detail.HTTPStatus} {
 		if candidate >= 400 && candidate <= 599 {
@@ -82,10 +110,6 @@ func InferenceError(payload []byte, headers http.Header) *StatusError {
 		}
 	}
 	if status == 0 {
-		var code string
-		if json.Unmarshal(detail.Code, &code) != nil {
-			code = string(detail.Code)
-		}
 		for _, candidate := range []string{code, detail.Type} {
 			if numeric, err := strconv.Atoi(candidate); err == nil && numeric >= 400 && numeric <= 599 {
 				status = numeric
@@ -106,6 +130,10 @@ func InferenceError(payload []byte, headers http.Header) *StatusError {
 			}
 		}
 	}
+	// The gateway's numeric 422 code must not mask its explicit budget type.
+	if budgetExceeded && (status == 0 || status == http.StatusUnprocessableEntity || status == http.StatusTooManyRequests) {
+		status = http.StatusTooManyRequests
+	}
 	if status == 0 {
 		status = http.StatusBadGateway
 	}
@@ -113,9 +141,12 @@ func InferenceError(payload []byte, headers http.Header) *StatusError {
 	if status == http.StatusTooManyRequests {
 		message = "学校模型网关限流或配额暂不可用，请等待 CPA 冷却后重试"
 	}
+	if budgetExceeded && status == http.StatusTooManyRequests {
+		message = "学校模型网关预算额度已用尽（budget_exceeded），请等待 CPA 冷却后重试"
+	}
 	retry := retryAfterSeconds(headers.Get("Retry-After"), time.Now())
 	for _, hint := range []json.RawMessage{detail.RetryAfterSeconds, detail.RetryAfter, envelope.RetryAfter} {
 		retry = max(retry, retryJSONSeconds(hint))
 	}
-	return &StatusError{Status: status, Message: message, RetryAfter: retry}
+	return &StatusError{Status: status, Message: message, RetryAfter: retry, BudgetExceeded: budgetExceeded && status == http.StatusTooManyRequests}
 }

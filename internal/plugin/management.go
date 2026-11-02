@@ -86,7 +86,7 @@ func decodeWebBody(request rpcRequest, target any) error {
 func publicConfig(config ustc.Config) map[string]string {
 	return map[string]string{"network": config.Network, "proxy-url": config.ProxyURL,
 		"state-dir": config.StateDir, "iwan-binary": config.IwanBinary,
-		"iwan-server": config.IwanServer, "api-base": config.APIBase}
+		"iwan-server": config.IwanServer, "api-base": config.APIBase, "budget-cooldown": config.BudgetCooldown}
 }
 
 func (runtime *Runtime) handleManagement(ctx context.Context, service *ustc.Service, request rpcRequest) managementResponse {

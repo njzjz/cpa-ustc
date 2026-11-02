@@ -114,9 +114,10 @@ type Gateway struct {
 }
 
 type cachedAccount struct {
-	mu      sync.Mutex
-	account Account
-	gateway Gateway
+	mu          sync.Mutex
+	account     Account
+	gateway     Gateway
+	budgetUntil time.Time
 }
 
 // Service serializes token rotation per account and caches bootstrap credentials.
@@ -129,10 +130,11 @@ type Service struct {
 	bootstrapURL string
 	usageURL     string
 	apiClient    func(string) *http.Client
+	now          func() time.Time
 }
 
 func NewService(config Config) *Service {
-	return &Service{Config: config, Network: NewNetwork(config), accounts: map[string]*cachedAccount{}, identity: HTTPClient(""), bootstrapURL: BootstrapURL, usageURL: UsageURL, apiClient: HTTPClient}
+	return &Service{Config: config, Network: NewNetwork(config), accounts: map[string]*cachedAccount{}, identity: HTTPClient(""), bootstrapURL: BootstrapURL, usageURL: UsageURL, apiClient: HTTPClient, now: time.Now}
 }
 
 func (service *Service) Close() { service.Network.Close(); service.identity.CloseIdleConnections() }
@@ -292,6 +294,9 @@ func (service *Service) Models(ctx context.Context, account Account) ([]Model, A
 	if len(gateway.Models) > 0 {
 		return gateway.Models, updated, nil
 	}
+	if cooldown := service.budgetCooldown(account); cooldown != nil {
+		return nil, updated, cooldown
+	}
 	proxy, err := service.Network.Proxy(ctx)
 	if err != nil {
 		return nil, updated, err
@@ -306,7 +311,7 @@ func (service *Service) Models(ctx context.Context, account Account) ([]Model, A
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
-		return nil, updated, responseStatusError(response, "获取模型列表失败")
+		return nil, updated, service.RecordInferenceError(account, modelResponseError(response, "获取模型列表失败"))
 	}
 	var list struct {
 		Data []struct {
@@ -327,9 +332,10 @@ func (service *Service) Models(ctx context.Context, account Account) ([]Model, A
 
 // StatusError preserves upstream status without leaking credential-bearing response bodies.
 type StatusError struct {
-	Status     int
-	Message    string
-	RetryAfter int
+	Status         int
+	Message        string
+	RetryAfter     int
+	BudgetExceeded bool
 }
 
 func (err *StatusError) Error() string { return fmt.Sprintf("%s (HTTP %d)", err.Message, err.Status) }

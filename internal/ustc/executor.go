@@ -13,6 +13,12 @@ import (
 // Execute sends only translated chat-completions payloads and plugin-owned headers.
 // Stream bodies remain live; ownership passes to the caller, which must close them.
 func (service *Service) Execute(ctx context.Context, account Account, model string, payload []byte, stream bool) (*http.Response, Account, error) {
+	if err := account.Validate(); err != nil {
+		return nil, account, err
+	}
+	if cooldown := service.budgetCooldown(account); cooldown != nil {
+		return nil, account, cooldown
+	}
 	gateway, updated, err := service.Resolve(ctx, account)
 	if err != nil {
 		return nil, updated, err
@@ -32,6 +38,10 @@ func (service *Service) Execute(ctx context.Context, account Account, model stri
 		return nil, updated, err
 	}
 	client := service.apiClient(proxy)
+	if cooldown := service.budgetCooldown(account); cooldown != nil {
+		client.CloseIdleConnections()
+		return nil, updated, cooldown
+	}
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, gateway.Base+"/chat/completions", bytes.NewReader(data))
 	request.Header.Set("Authorization", "Bearer "+gateway.Key)
 	request.Header.Set("Content-Type", "application/json")
@@ -45,9 +55,10 @@ func (service *Service) Execute(ctx context.Context, account Account, model stri
 		return nil, updated, errors.New("学校模型请求失败，请检查校园网/iWAN 或稍后重试")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		upstream := modelResponseError(response, "学校模型网关拒绝请求")
 		response.Body.Close()
 		client.CloseIdleConnections()
-		return nil, updated, responseStatusError(response, "学校模型网关拒绝请求")
+		return nil, updated, service.RecordInferenceError(account, upstream)
 	}
 	response.Body = &ownedBody{ReadCloser: response.Body, client: client}
 	return response, updated, nil

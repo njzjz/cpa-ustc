@@ -9,26 +9,29 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
-	Provider       = "ustc"
-	Version        = "0.1.1"
-	Issuer         = "https://id.ustc.edu.cn/oidc"
-	BootstrapURL   = "https://id.ustc.edu.cn/ai/api/v1/bootstrap"
-	UsageURL       = "https://id.ustc.edu.cn/ai/api/v1/usage"
-	APIBase        = "https://api.llm.ustc.edu.cn/v1"
-	CampusCheckURL = "https://id.ustc.edu.cn/doc/claude/netcheck"
+	Provider              = "ustc"
+	Version               = "0.1.1"
+	Issuer                = "https://id.ustc.edu.cn/oidc"
+	BootstrapURL          = "https://id.ustc.edu.cn/ai/api/v1/bootstrap"
+	UsageURL              = "https://id.ustc.edu.cn/ai/api/v1/usage"
+	APIBase               = "https://api.llm.ustc.edu.cn/v1"
+	CampusCheckURL        = "https://id.ustc.edu.cn/doc/claude/netcheck"
+	DefaultBudgetCooldown = "30m"
 )
 
 // Config contains only public settings. Personal keys live in CPA's auth files.
 type Config struct {
-	Network    string `json:"network" yaml:"network"`
-	ProxyURL   string `json:"proxy_url,omitempty" yaml:"proxy-url"`
-	IwanBinary string `json:"iwan_binary,omitempty" yaml:"iwan-binary"`
-	IwanServer string `json:"iwan_server,omitempty" yaml:"iwan-server"`
-	StateDir   string `json:"state_dir,omitempty" yaml:"state-dir"`
-	APIBase    string `json:"api_base,omitempty" yaml:"api-base"`
+	Network        string `json:"network" yaml:"network"`
+	ProxyURL       string `json:"proxy_url,omitempty" yaml:"proxy-url"`
+	IwanBinary     string `json:"iwan_binary,omitempty" yaml:"iwan-binary"`
+	IwanServer     string `json:"iwan_server,omitempty" yaml:"iwan-server"`
+	StateDir       string `json:"state_dir,omitempty" yaml:"state-dir"`
+	APIBase        string `json:"api_base,omitempty" yaml:"api-base"`
+	BudgetCooldown string `json:"budget_cooldown,omitempty" yaml:"budget-cooldown"`
 }
 
 // DefaultConfig deliberately ignores ambient proxy variables for campus traffic.
@@ -37,7 +40,7 @@ func DefaultConfig() Config {
 	if err != nil {
 		directory = "."
 	}
-	return Config{Network: "auto", IwanBinary: "iwan-client-oidc", IwanServer: "1", StateDir: filepath.Join(directory, "cpa-ustc"), APIBase: APIBase}
+	return Config{Network: "auto", IwanBinary: "iwan-client-oidc", IwanServer: "1", StateDir: filepath.Join(directory, "cpa-ustc"), APIBase: APIBase, BudgetCooldown: DefaultBudgetCooldown}
 }
 
 // LoadConfig reads the shared CLI/plugin settings without creating directories.
@@ -61,6 +64,9 @@ func LoadConfig(path string) (Config, error) {
 
 // Validate rejects insecure gateway URLs and ambiguous network settings early.
 func (config Config) Validate() error {
+	if delay, err := time.ParseDuration(config.BudgetCooldown); err != nil || delay < time.Second || delay > 7*24*time.Hour {
+		return errors.New("budget-cooldown must be a duration between 1s and 168h, such as 30m or 3h")
+	}
 	if config.Network != "auto" && config.Network != "direct" && config.Network != "iwan" {
 		return errors.New("network must be auto, direct or iwan")
 	}
