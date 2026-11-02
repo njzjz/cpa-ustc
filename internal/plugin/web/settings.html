@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>中科大词元计划 · CPA</title>
+  <link rel="stylesheet" href="settings.css">
+  <script src="settings.js" defer></script>
+</head>
+<body>
+<main>
+  <header><span class="eyebrow">CLIProxyAPI / USTC</span><h1>中科大词元计划</h1><p>网页完成配置；模型账号直接加入 CPA 号池，不另建调度器。</p></header>
+  <div id="notice" role="status" aria-live="polite" hidden></div>
+  <section aria-labelledby="connection-title">
+    <h2 id="connection-title">管理连接</h2>
+    <p>插件页面不读取管理中心的私有存储。首次使用请填写本台 CPA 的管理密钥（不是客户端 Key 或科大 API Key），仅保留在当前页面内存。</p>
+    <form id="connection-form"><label>CPA 管理密钥<input id="management-key" type="password" autocomplete="off" required></label><div class="actions"><button type="submit">连接</button><button id="disconnect" type="button" class="secondary">断开并清除密钥</button></div></form>
+  </section>
+  <div id="workspace" hidden>
+    <section aria-labelledby="settings-title">
+      <h2 id="settings-title">网络与插件设置</h2>
+      <p>保存到 CPA 自己的插件配置并由 CPA 热更新；通用插件配置弹窗也能编辑这些字段。</p>
+      <form id="settings-form" class="grid">
+        <label>连接方式<select name="network"><option value="auto">自动：校内直连 / 校外 iWAN</option><option value="direct">直连（含已连接官方 VPN）</option><option value="iwan">强制使用托管 iWAN</option></select></label>
+        <label>iWAN 线路<input name="iwan-server" required></label>
+        <label class="wide">iWAN 客户端路径<input name="iwan-binary" required></label>
+        <label class="wide">状态目录（CPA 服务器上）<input name="state-dir" required></label>
+        <label class="wide">现有代理 URL（可选，优先于自动检测）<input name="proxy-url" placeholder="http://127.0.0.1:7890" autocomplete="off"></label>
+        <label class="wide">API Key 模式的 HTTPS API 地址<input name="api-base" type="url" required></label>
+        <div class="actions wide"><button type="submit">保存设置</button><button id="reload-settings" type="button" class="secondary">重新读取</button></div>
+      </form>
+    </section>
+    <section aria-labelledby="iwan-title">
+      <h2 id="iwan-title">iWAN 校外代理</h2><p id="network-status"></p>
+      <p>全部模型账号共用一条 iWAN 通路。首次授权需在浏览器登录后，将页面按钮中的 <code>com.panabit.mobile://…</code> 回调链接粘贴到此处；无需返回终端。</p>
+      <div class="actions"><button id="iwan-login" type="button">登录 / 更新 iWAN</button><button id="iwan-install" type="button" class="secondary">安装第三方 iWAN 客户端</button></div>
+      <p id="iwan-status" role="status"></p><p><a id="iwan-url" target="_blank" rel="noreferrer noopener" hidden>打开科大 iWAN 授权页面</a></p>
+      <form id="iwan-callback-form" hidden><label>iWAN 完整回调链接<input id="iwan-callback" type="password" autocomplete="off" required></label><button type="submit">提交 iWAN 授权</button></form>
+      <p class="muted">安装按钮会下载固定版本的第三方 ustc-iwan，并校验发布附件 SHA-256；它不是学校官方客户端，不修改系统 VPN。</p>
+    </section>
+    <section aria-labelledby="accounts-title">
+      <div class="section-heading"><h2 id="accounts-title">CPA 号池 · ustc</h2><button id="reload-accounts" type="button" class="secondary">刷新账号</button></div>
+      <p>支持多个科大账号或多个 API Key。选择、轮询、故障切换、禁用和删除均复用 CPA；重复添加同一账号更新原凭据。</p>
+      <button id="sso-login" type="button">添加科大账号</button>
+      <p id="sso-status" role="status"></p><p><a id="sso-url" target="_blank" rel="noreferrer noopener" hidden>打开科大统一身份认证</a></p>
+      <p>添加其他科大账号时，请先在学校认证页面退出当前账号或使用独立浏览器会话。密码和 MFA 只在学校官方页面输入。</p>
+      <details id="remote-callback"><summary>远程 / Docker 部署：提交浏览器回调</summary><p>若浏览器跳到无法连接的 <code>127.0.0.1</code> 页面，将地址栏的完整 URL 粘贴到下方；授权码不保存在浏览器存储中。</p><form id="sso-callback-form"><label>本次登录的完整回调链接<input id="sso-callback" type="password" autocomplete="off" required></label><button type="submit">提交科大授权</button></form></details>
+      <hr>
+      <h3>添加 API Key</h3>
+      <form id="key-form" class="grid">
+        <label class="wide">账号备注<input name="label" maxlength="128" autocomplete="off"></label>
+        <label>API Key<input name="api_key" type="password" autocomplete="off"></label>
+        <label>或：环境变量名<input name="api_key_env" placeholder="USTC_KEY_A" autocomplete="off"></label>
+        <p class="wide muted">二选一。直接输入的 Key 保存到 CPA 私有凭据文件；环境变量引用不保存 Key，CPA 进程必须已继承该变量。</p>
+        <div class="wide"><button type="submit">加入 CPA 号池</button></div>
+      </form>
+      <div class="table-scroll"><table><thead><tr><th>账号</th><th>凭据文件</th><th>状态</th><th>操作</th></tr></thead><tbody id="accounts"></tbody></table></div><p id="account-count"></p>
+    </section>
+  </div>
+</main>
+</body>
+</html>
