@@ -14,7 +14,7 @@ import (
 
 const (
 	Provider              = "ustc"
-	Version               = "0.1.1"
+	Version               = "0.1.2"
 	Issuer                = "https://id.ustc.edu.cn/oidc"
 	BootstrapURL          = "https://id.ustc.edu.cn/ai/api/v1/bootstrap"
 	UsageURL              = "https://id.ustc.edu.cn/ai/api/v1/usage"
