@@ -150,7 +150,7 @@ func Configure(path, pluginDir, authDir string, config ustc.Config) error {
 	if err != nil {
 		return err
 	}
-	for name, value := range map[string]any{"enabled": true, "priority": 10, "network": config.Network, "state-dir": config.StateDir, "iwan-binary": config.IwanBinary, "iwan-server": config.IwanServer, "proxy-url": config.ProxyURL, "api-base": config.APIBase, "budget-cooldown": config.BudgetCooldown} {
+	for name, value := range map[string]any{"enabled": true, "priority": 10, "network": config.Network, "state-dir": config.StateDir, "iwan-binary": config.IwanBinary, "iwan-server": config.IwanServer, "proxy-url": config.ProxyURL, "api-base": config.APIBase, "budget-cooldown": config.BudgetCooldown, "donation-mode": config.DonationMode, "donation-origin": config.DonationOrigin} {
 		set(provider, name, value)
 	}
 	data, err := yaml.Marshal(document)

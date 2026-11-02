@@ -18,19 +18,21 @@ import (
 
 // Account is CPA's provider-owned auth JSON. Gateway keys from SSO stay in memory.
 type Account struct {
-	Type         string                     `json:"type"`
-	ID           string                     `json:"id"`
-	Label        string                     `json:"label"`
-	APIKey       string                     `json:"api_key,omitempty"`
-	APIKeyEnv    string                     `json:"api_key_env,omitempty"`
-	APIBase      string                     `json:"api_base,omitempty"`
-	AccessToken  string                     `json:"access_token,omitempty"`
-	RefreshToken string                     `json:"refresh_token,omitempty"`
-	ExpiresAt    time.Time                  `json:"expires_at,omitempty"`
-	Subject      string                     `json:"subject,omitempty"`
-	Issuer       string                     `json:"issuer,omitempty"`
-	ClientID     string                     `json:"client_id,omitempty"`
-	CPAFields    map[string]json.RawMessage `json:"-"`
+	Type            string                     `json:"type"`
+	ID              string                     `json:"id"`
+	Label           string                     `json:"label"`
+	APIKey          string                     `json:"api_key,omitempty"`
+	APIKeyEnv       string                     `json:"api_key_env,omitempty"`
+	APIBase         string                     `json:"api_base,omitempty"`
+	AccessToken     string                     `json:"access_token,omitempty"`
+	RefreshToken    string                     `json:"refresh_token,omitempty"`
+	ExpiresAt       time.Time                  `json:"expires_at,omitempty"`
+	Subject         string                     `json:"subject,omitempty"`
+	Issuer          string                     `json:"issuer,omitempty"`
+	ClientID        string                     `json:"client_id,omitempty"`
+	Donated         bool                       `json:"donated,omitempty"`
+	DonationRevoked bool                       `json:"donation_revoked,omitempty"`
+	CPAFields       map[string]json.RawMessage `json:"-"`
 }
 
 // UnmarshalJSON retains CPA-owned routing fields so token rotation does not
@@ -45,7 +47,7 @@ func (account *Account) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
-	for _, name := range []string{"type", "id", "label", "api_key", "api_key_env", "api_base", "access_token", "refresh_token", "expires_at", "subject", "issuer", "client_id"} {
+	for _, name := range []string{"type", "id", "label", "api_key", "api_key_env", "api_base", "access_token", "refresh_token", "expires_at", "subject", "issuer", "client_id", "donated", "donation_revoked"} {
 		delete(fields, name)
 	}
 	decoded.CPAFields = fields
@@ -85,6 +87,14 @@ func APIAccount(key, environment string, config Config) (Account, error) {
 func (account Account) Validate() error {
 	if account.Type != Provider || !accountID.MatchString(account.ID) {
 		return errors.New("invalid USTC account")
+	}
+	// A withdrawal is a disabled, secret-free tombstone: the host ABI cannot
+	// delete credentials, and retaining identity prevents accidental re-enabling.
+	if account.DonationRevoked {
+		if account.Donated && account.Issuer == Issuer && account.ClientID == "tokenworks" && account.Subject != "" && account.AccessToken == "" && account.RefreshToken == "" && account.APIKey == "" && account.APIKeyEnv == "" && string(account.CPAFields["disabled"]) == "true" {
+			return nil
+		}
+		return errors.New("invalid withdrawn donation")
 	}
 	if account.APIKey != "" || account.APIKeyEnv != "" {
 		return trustedURL(account.APIBase)
@@ -139,6 +149,21 @@ func NewService(config Config) *Service {
 
 func (service *Service) Close() { service.Network.Close(); service.identity.CloseIdleConnections() }
 
+// ForgetAccount drops cached identity and gateway credentials after withdrawal.
+// Already dispatched requests cannot be recalled; CPA disables future selection.
+func (service *Service) ForgetAccount(identifier string) {
+	service.mu.Lock()
+	entry := service.accounts[identifier]
+	delete(service.accounts, identifier)
+	service.mu.Unlock()
+	if entry != nil {
+		entry.mu.Lock()
+		entry.account = Account{}
+		entry.gateway = Gateway{}
+		entry.mu.Unlock()
+	}
+}
+
 func (service *Service) cached(account Account) *cachedAccount {
 	service.mu.Lock()
 	defer service.mu.Unlock()
@@ -154,6 +179,9 @@ func (service *Service) cached(account Account) *cachedAccount {
 func (service *Service) Resolve(ctx context.Context, account Account) (Gateway, Account, error) {
 	if err := account.Validate(); err != nil {
 		return Gateway{}, account, err
+	}
+	if account.DonationRevoked {
+		return Gateway{}, account, &StatusError{Status: 403, Message: "此捐献已撤回，请由管理员删除停用记录后重新授权"}
 	}
 	entry := service.cached(account)
 	entry.mu.Lock()
@@ -187,6 +215,9 @@ func (service *Service) Resolve(ctx context.Context, account Account) (Gateway, 
 // oauthAccount shares token rotation between inference and quota queries. The
 // caller holds entry.mu until its identity request completes, including errors.
 func (service *Service) oauthAccount(ctx context.Context, entry *cachedAccount, account Account) (Account, error) {
+	if account.DonationRevoked {
+		return account, &StatusError{Status: 403, Message: "此捐献已撤回"}
+	}
 	current := entry.account
 	// A newer login must supersede an older cached refresh token for the same subject.
 	if account.ExpiresAt.After(current.ExpiresAt) && account.AccessToken != current.AccessToken {
@@ -196,6 +227,10 @@ func (service *Service) oauthAccount(ctx context.Context, entry *cachedAccount, 
 	}
 	current.CPAFields = account.CPAFields
 	entry.account.CPAFields = account.CPAFields
+	// Donation ownership is file-owned metadata, not part of token rotation.
+	// Bootstrap may already have cached this identity before it entered the pool.
+	current.Donated, current.DonationRevoked = account.Donated, account.DonationRevoked
+	entry.account.Donated, entry.account.DonationRevoked = account.Donated, account.DonationRevoked
 	if time.Until(current.ExpiresAt) < time.Minute {
 		updated, err := service.refresh(ctx, current)
 		if err != nil {

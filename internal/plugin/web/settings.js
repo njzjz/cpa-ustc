@@ -51,6 +51,13 @@
       if (form.elements.namedItem(name)) form.elements.namedItem(name).value = value;
     }
     element("network-status").textContent = `客户端：${data.iwan_installed ? "已安装" : "未找到"}；线路凭据：${data.iwan_configured ? "已配置（有效性以实际连接为准）" : "未配置"}`;
+    const donationLink = element("donation-link");
+    donationLink.hidden = true;
+    donationLink.removeAttribute("href");
+    if (data.config["donation-mode"] === "open" && data.config["donation-origin"]) {
+      donationLink.href = new URL("/v0/resource/plugins/ustc/donate", data.config["donation-origin"]).href;
+      donationLink.hidden = false;
+    }
   }
 
   async function loadAccounts() {

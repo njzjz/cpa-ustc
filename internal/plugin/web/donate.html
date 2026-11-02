@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>科大模型额度 · 自愿捐献</title>
+  <link rel="stylesheet" href="settings.css">
+  <script src="donate.js" defer></script>
+</head>
+<body>
+<main>
+  <header><span class="eyebrow">USTC / COMMUNITY CONTRIBUTION</span><h1>让闲置额度帮助更多人</h1><p>只需科大官方 OAuth 登录。不需要 CPA 管理密钥、客户端 Key 或手动申请的学校 API Key。</p></header>
+  <div id="notice" role="status" aria-live="polite">正在建立安全会话…</div>
+  <section>
+    <h2>授权之前，请先了解</h2>
+    <p>这是本 CPA 运营者提供的社区捐献入口，并非学校官方服务。请先核实本站运营者身份，并确认学校允许这种共享使用。</p>
+    <p><strong>捐献不是额度转账：</strong>你允许本站 CPA 持续使用你账号的学校模型额度，可能影响你自己使用模型的余额或速率限制。学校决定实际权限和预算；本站不承诺独立的捐献限额。</p>
+    <p>密码、通行密钥和 MFA 只在 <strong>id.ustc.edu.cn</strong> 输入。本站服务器会保存模型访问所需的登录及自动刷新令牌，可读取其授权范围内的身份和模型信息；因此应仅向可信的运营者授权。浏览器不保存这些令牌。</p>
+    <p>你可以在此重新通过学校认证撤回自己的捐献。本 CPA 会停用对应凭据并清除令牌，保留无令牌的停用记录；已发出的请求无法追回，历史备份和学校侧授权需另行处理。撤回后重新加入须由管理员先删除停用记录。</p>
+    <label><input id="consent" type="checkbox"> 我已了解授权范围、额度消耗和撤回方式，自愿向本 CPA 提供模型调用授权。</label>
+    <div class="actions"><button id="donate-start" type="button" disabled>使用科大账号捐献</button><button id="withdraw-start" type="button" class="secondary" disabled>认证并撤回自己的捐献</button></div>
+  </section>
+  <section id="device" hidden>
+    <h2>在学校页面完成授权</h2>
+    <p>若学校要求输入设备验证码，请使用：<strong id="user-code"></strong></p>
+    <p><a id="verification-link" target="_blank" rel="noreferrer noopener">打开学校统一认证与授权</a></p>
+    <p class="muted">不要替他人输入设备验证码，也不要把验证码发给别人。授权完成后返回此页，还需确认才会修改 CPA 号池。</p>
+    <p id="device-expiry"></p>
+  </section>
+  <section id="confirmation" hidden>
+    <h2 id="confirmation-title">确认授权身份</h2>
+    <p>学校认证的账号：<strong id="identity-label"></strong></p>
+    <p id="confirmation-description"></p>
+    <button id="confirm" type="button">确认</button>
+  </section>
+  <footer>只管理当前认证身份的捐献，不提供号池列表、凭据下载、推理访问 Key 或管理权限。单次会话最长 10 分钟。</footer>
+</main>
+</body>
+</html>

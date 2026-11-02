@@ -117,6 +117,16 @@ API Key 模式没有已确认的独立额度查询接口，返回明确的不可
 
 排查 502 时不能只看 Cloudflare 的错误 JSON：实测 CPA 自己返回的额度查询 502 也可能被 Cloudflare 替换正文，不等于 CPA 崩溃。`POST /v0/management/quota/fetch`（`auth_index`、`provider: ustc`、`plugin_id: ustc`）会在 CPA 日志记录底层错误；结合只读管理日志诊断，不通过重置预算或反复推理探测。
 
+### 3.1 公开捐献与设备授权
+
+开发版新增默认关闭的 `donation-mode: open` 和 `donation-origin`。使用已公布的 `tokenworks` public client，通过 OIDC discovery 的可信 `device_authorization_endpoint` 初始化 RFC 8628 授权；不猜测私有客户端、不需要 client secret 或自定义回调 URI。设备私密码仅留在服务器内存，浏览器只获取用户验证码和 `id.ustc.edu.cn` 上的授权链接。
+
+令牌轮询在服务器强制执行 interval、`authorization_pending`、`slow_down`、网络 / 5xx 退避和失效截止时间。成功后验证 RS256/JWKS、issuer、audience / azp、有效期、签发时间、可选 `at_hash`、userinfo subject，并要求可自动刷新的令牌。授权成功仅进入待确认状态，不能自动写入号池。
+
+公开页面及接口位于 `/v0/resource/plugins/ustc/donate` 前缀。当前 CPA 只提供 GET resource handlers，因此这些非缓存接口使用浏览器控制的同源 Fetch Metadata、与配置匹配的 origin、自定义请求头、host-only HttpOnly / SameSite=Strict Cookie、内存 CSRF 和每次授权独立的一次性确认码；不把任何会话凭据放在 URL，不开放管理接口。CSP 禁止第三方资源和 iframe 嵌入。公开资源回调在请求作用域内使用 `host.auth.list/get/save`，浏览器不能指定账号、文件名或令牌。
+
+新记录只使用经学校验证身份派生的 `ustc-donation-…` ID，且不覆盖普通 SSO 记录或已有捐献设置。自助撤回要求新学校认证及确认，只保存本身份的 `donated` / `donation_revoked` / `disabled` 无令牌记录，并丢弃进程内对应缓存；已发出的请求不可追回。宿主没有 auth delete callback，因此不会伪称已从学校侧撤销 OAuth grant，也不从公开入口调用管理删除 API。
+
 ## 4. iWAN
 
 [官方说明](https://mail.ustc.edu.cn/notice/iwan/)指出，客户域为 `iwan.ustc`，使用科大统一身份认证；隧道使用 UDP，常见端口为 6001/6002。官方客户端正常提供通路时无需重复安装第三方客户端。

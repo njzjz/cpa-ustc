@@ -32,6 +32,8 @@ type Config struct {
 	StateDir       string `json:"state_dir,omitempty" yaml:"state-dir"`
 	APIBase        string `json:"api_base,omitempty" yaml:"api-base"`
 	BudgetCooldown string `json:"budget_cooldown,omitempty" yaml:"budget-cooldown"`
+	DonationMode   string `json:"donation_mode,omitempty" yaml:"donation-mode"`
+	DonationOrigin string `json:"donation_origin,omitempty" yaml:"donation-origin"`
 }
 
 // DefaultConfig deliberately ignores ambient proxy variables for campus traffic.
@@ -40,7 +42,7 @@ func DefaultConfig() Config {
 	if err != nil {
 		directory = "."
 	}
-	return Config{Network: "auto", IwanBinary: "iwan-client-oidc", IwanServer: "1", StateDir: filepath.Join(directory, "cpa-ustc"), APIBase: APIBase, BudgetCooldown: DefaultBudgetCooldown}
+	return Config{Network: "auto", IwanBinary: "iwan-client-oidc", IwanServer: "1", StateDir: filepath.Join(directory, "cpa-ustc"), APIBase: APIBase, BudgetCooldown: DefaultBudgetCooldown, DonationMode: "disabled"}
 }
 
 // LoadConfig reads the shared CLI/plugin settings without creating directories.
@@ -64,6 +66,15 @@ func LoadConfig(path string) (Config, error) {
 
 // Validate rejects insecure gateway URLs and ambiguous network settings early.
 func (config Config) Validate() error {
+	if config.DonationMode != "" && config.DonationMode != "disabled" && config.DonationMode != "open" {
+		return errors.New("donation-mode must be disabled or open")
+	}
+	if config.DonationMode == "open" || config.DonationOrigin != "" {
+		origin, err := url.Parse(config.DonationOrigin)
+		if err != nil || origin.Hostname() == "" || origin.User != nil || origin.RawQuery != "" || origin.Fragment != "" || origin.Opaque != "" || (origin.Path != "" && origin.Path != "/") || (origin.Scheme != "https" && !(origin.Scheme == "http" && (origin.Hostname() == "localhost" || origin.Hostname() == "127.0.0.1" || origin.Hostname() == "::1"))) {
+			return errors.New("donation-origin must be an HTTPS origin without a path; HTTP is allowed only on localhost for testing")
+		}
+	}
 	if delay, err := time.ParseDuration(config.BudgetCooldown); err != nil || delay < time.Second || delay > 7*24*time.Hour {
 		return errors.New("budget-cooldown must be a duration between 1s and 168h, such as 30m or 3h")
 	}

@@ -28,6 +28,9 @@
         <label class="wide">现有代理 URL（可选，优先于自动检测）<input name="proxy-url" placeholder="http://127.0.0.1:7890" autocomplete="off"></label>
         <label class="wide">API Key 模式的 HTTPS API 地址<input name="api-base" type="url" required></label>
         <label class="wide">预算耗尽默认冷却（无上游重试提示时）<input name="budget-cooldown" placeholder="30m" required><span class="muted">例如 30m、3h，范围 1s–168h。同一凭据的所有模型共用保护；不是学校额度实际重置时间。</span></label>
+        <label>公开捐献入口<select name="donation-mode"><option value="disabled">关闭（默认）</option><option value="open">开放学校 OAuth 授权入池</option></select></label>
+        <label>捐献页站点源<input name="donation-origin" type="url" placeholder="https://cpa.example.com"><span class="muted">不含路径，须为实际访问的 HTTPS 站点；仅本机调试允许 HTTP。开放前确认学校允许共享使用。</span></label>
+        <p class="wide"><a id="donation-link" target="_blank" rel="noreferrer noopener" hidden>打开公开捐献页（不需要管理密钥）</a></p>
         <div class="actions wide"><button type="submit">保存设置</button><button id="reload-settings" type="button" class="secondary">重新读取</button></div>
       </form>
     </section>

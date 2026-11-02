@@ -21,8 +21,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Public resources contain only static assets. Every operation and status read
-// lives under CPA's authenticated management prefix, never the resource prefix.
+// Management operations remain authenticated. The optional donation portal has
+// its own origin/session/CSRF boundary and exposes no management capabilities.
 //
 //go:embed web/*
 var webAssets embed.FS
@@ -43,6 +43,9 @@ func managementRegistration() any {
 	return map[string]any{"routes": routes, "resources": []map[string]string{
 		{"Path": "/settings", "Menu": "中科大词元计划", "Description": "网络设置、科大登录、API Key 和 CPA 号池"},
 		{"Path": "/settings.js"}, {"Path": "/settings.css"},
+		{"Path": "/donate"}, {"Path": "/donate.js"},
+		{"Path": "/donate/session"}, {"Path": "/donate/start"},
+		{"Path": "/donate/poll"}, {"Path": "/donate/confirm"},
 	}}
 }
 
@@ -86,10 +89,17 @@ func decodeWebBody(request rpcRequest, target any) error {
 func publicConfig(config ustc.Config) map[string]string {
 	return map[string]string{"network": config.Network, "proxy-url": config.ProxyURL,
 		"state-dir": config.StateDir, "iwan-binary": config.IwanBinary,
-		"iwan-server": config.IwanServer, "api-base": config.APIBase, "budget-cooldown": config.BudgetCooldown}
+		"iwan-server": config.IwanServer, "api-base": config.APIBase, "budget-cooldown": config.BudgetCooldown,
+		"donation-mode": config.DonationMode, "donation-origin": config.DonationOrigin}
 }
 
 func (runtime *Runtime) handleManagement(ctx context.Context, service *ustc.Service, request rpcRequest) managementResponse {
+	if request.Path == resourcePrefix+"donate" || request.Path == resourcePrefix+"donate.js" || strings.HasPrefix(request.Path, resourcePrefix+"donate/") {
+		if request.Method != http.MethodGet || runtime.donations == nil || service.Config.DonationMode != "open" {
+			return webError(404, "捐献入口未开放")
+		}
+		return runtime.donations.handle(ctx, runtime.Host, request)
+	}
 	if request.Method == http.MethodGet && strings.HasPrefix(request.Path, resourcePrefix) {
 		name := strings.TrimPrefix(request.Path, resourcePrefix)
 		contentType := ""

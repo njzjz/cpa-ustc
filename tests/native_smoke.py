@@ -378,6 +378,10 @@ class NativeSmoke(unittest.TestCase):
                 self.assertIn("ustc", entry["oauth_providers"])
                 self.assertIn("api-base", [field["name"] for field in entry["config_fields"]])
                 self.assertIn("budget-cooldown", [field["name"] for field in entry["config_fields"]])
+                self.assertIn("donation-mode", [field["name"] for field in entry["config_fields"]])
+                with self.assertRaises(urllib.error.HTTPError) as closed:
+                    opener.open(request("/v0/resource/plugins/ustc/donate", authenticated=False), timeout=5)
+                self.assertEqual(closed.exception.code, 404)
                 self.assertEqual(entry["menus"][0]["path"], "/v0/resource/plugins/ustc/settings")
                 for resource, content_type in [("settings", "text/html"), ("settings.js", "application/javascript"), ("settings.css", "text/css")]:
                     with opener.open(request("/v0/resource/plugins/ustc/" + resource, authenticated=False), timeout=5) as response:
@@ -441,6 +445,8 @@ class NativeSmoke(unittest.TestCase):
                 if "value" in saved_config:
                     saved_config = saved_config["value"]
                 saved_config["iwan-server"] = "web-saved-line"
+                saved_config["donation-mode"] = "open"
+                saved_config["donation-origin"] = f"http://127.0.0.1:{port}"
                 with opener.open(request(config_path, saved_config, "PUT"), timeout=5):
                     pass
                 deadline = time.monotonic() + 10
@@ -451,6 +457,46 @@ class NativeSmoke(unittest.TestCase):
                         break
                     time.sleep(0.1)
                 self.assertEqual(state["config"]["iwan-server"], "web-saved-line")
+                with opener.open(request("/v0/resource/plugins/ustc/donate", authenticated=False), timeout=5) as response:
+                    self.assertIn(b"donate.js", response.read())
+                    self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
+                session_path = "/v0/resource/plugins/ustc/donate/session"
+                with self.assertRaises(urllib.error.HTTPError) as missing_metadata:
+                    opener.open(request(session_path, authenticated=False), timeout=5)
+                self.assertEqual(missing_metadata.exception.code, 403)
+                public_session = request(session_path, authenticated=False)
+                public_session.add_header("Sec-Fetch-Site", "same-origin")
+                public_session.add_header("Sec-Fetch-Mode", "same-origin")
+                public_session.add_header("X-USTC-Donation-Origin", f"http://127.0.0.1:{port}")
+                with opener.open(public_session, timeout=5) as response:
+                    session = json.load(response)
+                    cookie = response.headers["Set-Cookie"]
+                self.assertGreaterEqual(len(session["csrf"]), 40)
+                self.assertIn("HttpOnly", cookie)
+                self.assertIn("SameSite=Strict", cookie)
+                unverified_confirm = request("/v0/resource/plugins/ustc/donate/confirm", authenticated=False)
+                for name, value in {"Sec-Fetch-Site":"same-origin", "Sec-Fetch-Mode":"same-origin", "X-USTC-Donation-Origin":f"http://127.0.0.1:{port}", "Cookie":cookie.split(";", 1)[0], "X-USTC-Donation-CSRF":session["csrf"]}.items():
+                    unverified_confirm.add_header(name, value)
+                with self.assertRaises(urllib.error.HTTPError) as unverified:
+                    opener.open(unverified_confirm, timeout=5)
+                self.assertEqual(unverified.exception.code, 409)
+
+                # The host must load withdrawals as disabled native credentials
+                # even though no access/refresh token remains in their files.
+                tombstone_name = "ustc-donation-withdrawn.json"
+                (auth / tombstone_name).write_text(json.dumps({"type":"ustc", "id":"ustc-donation-withdrawn", "label":"Withdrawn", "issuer":"https://id.ustc.edu.cn/oidc", "client_id":"tokenworks", "subject":"offline-withdrawn-subject", "donated":True, "donation_revoked":True, "disabled":True}))
+                withdrawn = None
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    with opener.open(request("/v8/management/credentials"), timeout=5) as response:
+                        withdrawn = next((entry for entry in json.load(response)["files"] if entry["name"] == tombstone_name), None)
+                    if withdrawn is not None:
+                        break
+                    time.sleep(0.1)
+                self.assertIsNotNone(withdrawn)
+                self.assertTrue(withdrawn["disabled"])
+                with opener.open(request("/v8/management/credentials", {"names":[tombstone_name]}, "DELETE"), timeout=5):
+                    pass
                 if os.environ.get("CPA_USTC_PLAYWRIGHT_MODULE"):
                     helper = root / "fake-iwan"
                     helper.write_text(

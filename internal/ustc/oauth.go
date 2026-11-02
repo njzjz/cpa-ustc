@@ -123,6 +123,7 @@ type discovery struct {
 	Userinfo      string `json:"userinfo_endpoint"`
 	JWKS          string `json:"jwks_uri"`
 	RequireIssuer bool   `json:"authorization_response_iss_parameter_supported"`
+	Device        string `json:"device_authorization_endpoint"`
 }
 
 func getJSON(ctx context.Context, client *http.Client, target, token string, destination any) error {
@@ -367,9 +368,18 @@ func (service *Service) exchange(ctx context.Context, document discovery, code, 
 	if err != nil {
 		return Account{}, err
 	}
+	return service.identityAccount(ctx, document, token, nonce, time.Time{})
+}
+
+// identityAccount applies identical identity/token checks to browser and device
+// grants. Device grants bind tokens to a server-held code instead of a nonce.
+func (service *Service) identityAccount(ctx context.Context, document discovery, token tokenResponse, nonce string, started time.Time) (Account, error) {
 	claims, err := service.verifyIDToken(ctx, document, token.ID, nonce, token.Access)
 	if err != nil {
 		return Account{}, err
+	}
+	if !started.IsZero() && claims.Issued < started.Unix()-30 {
+		return Account{}, errors.New("设备授权返回的身份令牌早于本次授权")
 	}
 	var identity struct {
 		Subject string `json:"sub"`

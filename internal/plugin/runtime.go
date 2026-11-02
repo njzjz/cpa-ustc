@@ -45,15 +45,16 @@ type rpcRequest struct {
 
 // Runtime owns provider state, concurrent SSO attempts and background SSE relays.
 type Runtime struct {
-	gate    sync.RWMutex
-	mu      sync.Mutex
-	service *ustc.Service
-	ctx     context.Context
-	cancel  context.CancelFunc
-	logins  map[string]*ustc.Login
-	streams sync.WaitGroup
-	Host    HostCall
-	webJob  *webJob
+	gate      sync.RWMutex
+	mu        sync.Mutex
+	service   *ustc.Service
+	ctx       context.Context
+	cancel    context.CancelFunc
+	logins    map[string]*ustc.Login
+	streams   sync.WaitGroup
+	Host      HostCall
+	webJob    *webJob
+	donations *donationPortal
 }
 
 func New(host HostCall) *Runtime {
@@ -86,6 +87,10 @@ func (runtime *Runtime) close() {
 	runtime.cancel()
 	service := runtime.service
 	runtime.service = nil
+	if runtime.donations != nil {
+		runtime.donations.close()
+		runtime.donations = nil
+	}
 	if runtime.webJob != nil {
 		runtime.webJob.cancel()
 	}
@@ -121,6 +126,7 @@ func (runtime *Runtime) configure(request rpcRequest) (any, error) {
 		runtime.mu.Lock()
 		runtime.ctx, runtime.cancel = context.WithCancel(context.Background())
 		runtime.service = ustc.NewService(config)
+		runtime.donations = newDonationPortal(runtime.service)
 		runtime.mu.Unlock()
 	}
 	return map[string]any{
@@ -133,6 +139,8 @@ func (runtime *Runtime) configure(request rpcRequest) (any, error) {
 			{"Name": "proxy-url", "Type": "string", "Default": "", "Description": "显式使用已有 HTTP(S)/SOCKS5 代理，优先于自动检测"},
 			{"Name": "api-base", "Type": "string", "Default": ustc.APIBase, "Description": "直接 API Key 账号的 HTTPS API 地址；不影响学校 SSO 下发的网关"},
 			{"Name": "budget-cooldown", "Type": "string", "Default": ustc.DefaultBudgetCooldown, "Description": "budget_exceeded 无上游重试提示时的凭据级冷却，如 30m、3h；不是学校预算重置时间"},
+			{"Name": "donation-mode", "Type": "enum", "Default": "disabled", "EnumValues": []string{"disabled", "open"}, "Description": "公开捐献入口，默认关闭；开启前请确认学校允许共享使用"},
+			{"Name": "donation-origin", "Type": "string", "Default": "", "Description": "捐献页面的 HTTPS 站点源，例如 https://cpa.example.com，不含路径；仅本机调试允许 HTTP"},
 		}},
 		"capabilities": map[string]any{"auth_provider": true, "model_provider": true, "management_api": true, "quota_provider": true, "executor": true, "executor_model_scope": "oauth", "executor_input_formats": []string{"openai"}, "executor_output_formats": []string{"openai"}},
 	}, nil
