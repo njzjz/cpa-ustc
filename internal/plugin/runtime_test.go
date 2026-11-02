@@ -34,6 +34,9 @@ func configuredRuntime(t *testing.T) *Runtime {
 	if capabilities["executor_model_scope"] != "oauth" {
 		t.Fatal("auth-bound model scope does not match CPA ABI")
 	}
+	if capabilities["quota_provider"] != true {
+		t.Fatal("native quota provider capability missing")
+	}
 	return runtime
 }
 

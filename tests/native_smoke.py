@@ -200,6 +200,17 @@ class NativeSmoke(unittest.TestCase):
         registration = self.call("plugin.register", {"schema_version": 1, "config_yaml": base64.b64encode(config.encode()).decode()})
         self.assertTrue(registration["ok"], registration)
         self.assertEqual(registration["result"]["capabilities"]["executor_model_scope"], "oauth")
+        self.assertTrue(registration["result"]["capabilities"]["quota_provider"])
+
+    def test_quota_contract(self):
+        description = self.call("quota.describe")["result"]
+        self.assertEqual(description["supported_providers"], ["ustc"])
+        self.assertFalse(description["supports_reset"])
+        response = self.call("quota.fetch", {"provider": "ustc", "storage_json": self.storage})
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["http_status"], 501)
+        self.assertIn("统一认证", response["error"]["message"])
+        self.assertNotIn("native-test-key", json.dumps(response))
 
     def test_auth_and_models(self):
         parsed = self.call("auth.parse", {"RawJSON": self.storage})
@@ -316,6 +327,20 @@ class NativeSmoke(unittest.TestCase):
                 self.assertEqual(len(accounts), 2)
                 self.assertNotIn("native-test-key", json.dumps(accounts))
                 self.assertTrue((auth / second["name"]).exists())
+
+                # CPA itself advertises quota support and selects this plugin.
+                with opener.open(request("/v8/management/credentials"), timeout=5) as response:
+                    credentials = json.load(response)["files"]
+                for credential in credentials:
+                    self.assertTrue(credential["supports_quota"])
+                    self.assertEqual(credential["quota_plugin_id"], "ustc")
+                    quota_path = "/v8/management/plugins/ustc/quota"
+                    with self.assertRaises(urllib.error.HTTPError) as unsupported:
+                        opener.open(request(quota_path, {"auth_index": credential["auth_index"]}), timeout=5)
+                    self.assertEqual(unsupported.exception.code, 502)
+                    error = json.load(unsupported.exception)["error"]
+                    self.assertIn("统一认证", error)
+                    self.assertNotIn("native-test-key", error)
 
                 # Both credentials are selected by CPA's own round-robin scheduler.
                 with self.lock:

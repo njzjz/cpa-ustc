@@ -96,6 +96,20 @@ scopes: openid profile email offline_access
 
 通用 OIDC 实现参考上游 [EduWork 提交 8d05453f5095ee979666f8a7f5c910892f2fbbd5](https://github.com/ECNU/EduWork/tree/8d05453f5095ee979666f8a7f5c910892f2fbbd5) 的 `packages/dsh-oidc`；学校特有 bootstrap 依据为学校自己的下载包，不将通用 OIDC 登录误当作模型授权。
 
+### 原生额度提供商
+
+注册 `quota_provider`，实现 `quota.describe` / `quota.fetch` / `quota.reset`；只读查询声明 `supports_reset=false`。CPA 根据账号的 `ustc` 提供商标记原生 `supports_quota`，网页额度功能通过 `POST /v8/management/plugins/ustc/quota` 和 `auth_index` 查询，无需改 CPA 源码。额度 RPC 的 `storage_json` 使用 snake_case，不能沿用执行器的 `StorageJSON` 字段名。
+
+依据同一份官方 `TokenWorks-0.2.106-windows-x64-electron.zip` 中 `@ustc/tokenworks-bootstrap/lib/index.js` 的 `usageUrl` / `fetchUsage()` 和 `@ustc/tokenworks-usage/lib/upstream.js`、`test/fixtures.mjs`：
+
+- `GET https://id.ustc.edu.cn/ai/api/v1/usage` 使用统一认证的 Bearer access token，由学校代查平台额度快照，不传模型网关 Key，也不调用推理或猜测其他计费接口。
+- `key.budget_windows[]` 给出 `budget_duration` / `max_budget` / `current_spend` / `reset_at`；`account` 给出 `scope` / `shared` / `budget_duration` / `max_budget` / `spend` / `reset_at`。数值允许 Decimal 的字符串形式，重置时间允许带时区 ISO 或 epoch 秒 / 毫秒。
+- `status` / `usage_status` / `error_code` / `freshness` 决定快照是否可用；未知、缺失、非有限数值及不同步的金额不能解释成零。明确 `unlimited` 的窗口不伪造百分比，没有可显示有限窗口时提示到学校平台确认。
+- Key 与共享账户分组展示，不合计预算。CPA 的 `remainingFraction` 限制在 `[0,1]`，超支的负余额仍在摘要和说明中保留。计费单位未作货币假设，不能换算成 token 数。
+- 统一认证刷新与推理共用互斥状态，即使后续用量请求失败也将已轮换令牌保存给 CPA。请求最长 15 秒，正文最多 256 KiB，拒绝带凭据重定向；只输出白名单数值、窗口、重置时间与固定说明，不输出原始上游 JSON / Key 名称。
+
+API Key 模式没有已确认的独立额度查询接口，返回明确的不可用提示，不尝试将 API Key 当身份令牌使用。官方包另有带副作用的 `quota-reset` 协议；本插件不实现，不把 CPA 调度冷却重置与学校预算重置混为一谈。
+
 ## 4. iWAN
 
 [官方说明](https://mail.ustc.edu.cn/notice/iwan/)指出，客户域为 `iwan.ustc`，使用科大统一身份认证；隧道使用 UDP，常见端口为 6001/6002。官方客户端正常提供通路时无需重复安装第三方客户端。

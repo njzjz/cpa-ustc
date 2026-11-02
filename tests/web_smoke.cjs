@@ -46,6 +46,24 @@ const { chromium } = require(process.env.CPA_USTC_PLAYWRIGHT_MODULE || "playwrig
     assert.equal(await page.locator('#key-form [name="api_key"]').inputValue(), "");
     assert.equal(await row.locator("img").count(), 0);
     assert.equal(await page.evaluate(() => window.injected), undefined);
+    await row.getByRole("button", { name: "查询额度", exact: true }).click();
+    await row.getByText(/仅 API Key 无法查询额度/).waitFor();
+
+    const quotaURL = "**/v8/management/plugins/ustc/quota";
+    await page.route(quotaURL, async (route) => {
+      const body = route.request().postDataJSON();
+      assert.equal(typeof body.auth_index, "string");
+      await route.fulfill({ json: { groups: [{ displayName: "用户共享额度", buckets: [{
+        window: "24h", remainingFraction: 0.75, resetTime: "2026-11-03T16:00:00Z",
+        description: '剩余 75 / 100 <img src=x onerror="window.quotaInjected=true">',
+      }] }] } });
+    });
+    await row.getByRole("button", { name: "查询额度", exact: true }).click();
+    await row.getByText(/用户共享额度 24h：剩余 75.0%/).waitFor();
+    assert((await row.textContent()).includes("重置时间："));
+    assert.equal(await row.locator("img").count(), 0);
+    assert.equal(await page.evaluate(() => window.quotaInjected), undefined);
+    await page.unroute(quotaURL);
     await row.getByRole("button", { name: "禁用", exact: true }).click();
     await row.getByRole("button", { name: "启用", exact: true }).waitFor();
     await row.getByRole("button", { name: "启用", exact: true }).click();
@@ -93,7 +111,7 @@ const { chromium } = require(process.env.CPA_USTC_PLAYWRIGHT_MODULE || "playwrig
     await page.getByRole("button", { name: "断开并清除密钥", exact: true }).click();
     assert.equal(await page.locator("#workspace").isHidden(), true);
     assert.deepEqual(errors, []);
-    console.log("Browser acceptance passed: configuration, CPA accounts, cooldown diagnostics, native status/delete, iWAN callback, secret handling.");
+    console.log("Browser acceptance passed: configuration, CPA accounts, native quota query/display, cooldown diagnostics, native status/delete, iWAN callback, secret handling.");
   } catch (error) {
     console.error("Browser notice:", await page.locator("#notice").textContent());
     console.error("iWAN status:", await page.locator("#iwan-status").textContent());

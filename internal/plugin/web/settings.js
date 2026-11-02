@@ -68,7 +68,36 @@
         cell.textContent = text;
         row.append(cell);
       }
+      const quotaCell = document.createElement("td");
+      quotaCell.textContent = "尚未查询";
+      row.append(quotaCell);
       const actions = document.createElement("td");
+      const quota = document.createElement("button");
+      quota.type = "button";
+      quota.className = "secondary";
+      quota.textContent = "查询额度";
+      quota.disabled = !account.auth_index;
+      quota.addEventListener("click", async () => {
+        quota.disabled = true;
+        quotaCell.textContent = "查询中…";
+        try {
+          const { data } = await api(hostAPI + "/plugins/ustc/quota", "POST", {
+            auth_index: account.auth_index,
+          });
+          quotaCell.replaceChildren();
+          for (const group of data.groups || []) {
+            for (const bucket of group.buckets || []) {
+              const line = document.createElement("p");
+              const reset = bucket.resetTime ? new Date(bucket.resetTime) : null;
+              const resetText = reset && Number.isFinite(reset.getTime()) ? reset.toLocaleString() : "未知";
+              line.textContent = `${group.displayName} ${bucket.window}：剩余 ${(bucket.remainingFraction * 100).toFixed(1)}%；${bucket.description || ""}；重置时间：${resetText}`;
+              quotaCell.append(line);
+            }
+          }
+          if (!quotaCell.childNodes.length) quotaCell.textContent = "学校未返回可显示的额度窗口";
+        } catch (error) { quotaCell.textContent = error.message; }
+        finally { quota.disabled = false; }
+      });
       const toggle = document.createElement("button");
       toggle.type = "button";
       toggle.className = "secondary";
@@ -84,7 +113,7 @@
         if (!window.confirm(`从 CPA 号池删除 ${account.label || account.name}？`)) return;
         await api(hostAPI + "/credentials", "DELETE", { names: [account.name] });
       }));
-      actions.append(toggle, remove);
+      actions.append(quota, toggle, remove);
       row.append(actions);
       table.append(row);
     }

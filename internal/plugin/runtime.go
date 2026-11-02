@@ -24,22 +24,23 @@ type HostCall func(method string, request any, response any) error
 var Repository = "https://github.com/njzjz/cpa-ustc"
 
 type rpcRequest struct {
-	ConfigYAML     []byte `json:"config_yaml"`
-	SchemaVersion  uint32 `json:"schema_version"`
-	Provider       string
-	FileName       string
-	RawJSON        []byte
-	StorageJSON    []byte
-	State          string
-	Model          string
-	Format         string
-	Payload        []byte
-	StreamID       string `json:"stream_id"`
-	HostCallbackID string `json:"host_callback_id"`
-	Method         string
-	Path           string
-	Headers        http.Header
-	Body           []byte
+	ConfigYAML       []byte `json:"config_yaml"`
+	SchemaVersion    uint32 `json:"schema_version"`
+	Provider         string
+	FileName         string
+	RawJSON          []byte
+	StorageJSON      []byte
+	QuotaStorageJSON []byte `json:"storage_json"`
+	State            string
+	Model            string
+	Format           string
+	Payload          []byte
+	StreamID         string `json:"stream_id"`
+	HostCallbackID   string `json:"host_callback_id"`
+	Method           string
+	Path             string
+	Headers          http.Header
+	Body             []byte
 }
 
 // Runtime owns provider state, concurrent SSO attempts and background SSE relays.
@@ -132,7 +133,7 @@ func (runtime *Runtime) configure(request rpcRequest) (any, error) {
 			{"Name": "proxy-url", "Type": "string", "Default": "", "Description": "显式使用已有 HTTP(S)/SOCKS5 代理，优先于自动检测"},
 			{"Name": "api-base", "Type": "string", "Default": ustc.APIBase, "Description": "直接 API Key 账号的 HTTPS API 地址；不影响学校 SSO 下发的网关"},
 		}},
-		"capabilities": map[string]any{"auth_provider": true, "model_provider": true, "management_api": true, "executor": true, "executor_model_scope": "oauth", "executor_input_formats": []string{"openai"}, "executor_output_formats": []string{"openai"}},
+		"capabilities": map[string]any{"auth_provider": true, "model_provider": true, "management_api": true, "quota_provider": true, "executor": true, "executor_model_scope": "oauth", "executor_input_formats": []string{"openai"}, "executor_output_formats": []string{"openai"}},
 	}, nil
 }
 
@@ -202,7 +203,7 @@ func (runtime *Runtime) dispatch(method string, request rpcRequest) (any, error)
 	if method == "plugin.register" || method == "plugin.reconfigure" {
 		return runtime.configure(request)
 	}
-	if method == "auth.identifier" || method == "executor.identifier" {
+	if method == "auth.identifier" || method == "executor.identifier" || method == "quota.identifier" {
 		return map[string]string{"identifier": ustc.Provider}, nil
 	}
 	if method == "management.register" {
@@ -213,6 +214,23 @@ func (runtime *Runtime) dispatch(method string, request rpcRequest) (any, error)
 		return nil, err
 	}
 	switch method {
+	case "quota.describe":
+		return map[string]any{"supported_providers": []string{ustc.Provider}, "display_name": "中科大词元计划", "supports_reset": false}, nil
+	case "quota.fetch":
+		if request.Provider != ustc.Provider {
+			return nil, errors.New("额度查询仅支持 ustc 账号")
+		}
+		account, parseErr := decodeAccount(request.QuotaStorageJSON)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		quota, updated, fetchErr := service.FetchQuota(ctx, account)
+		if persistErr := runtime.persistRotated(account, updated); persistErr != nil {
+			return nil, persistErr
+		}
+		return quota, fetchErr
+	case "quota.reset":
+		return nil, &ustc.StatusError{Status: 501, Message: "本插件仅查询学校额度，不执行额度重置"}
 	case "management.handle":
 		return runtime.handleManagement(ctx, service, request), nil
 	case "auth.parse":

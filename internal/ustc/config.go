@@ -16,6 +16,7 @@ const (
 	Version        = "0.1.1"
 	Issuer         = "https://id.ustc.edu.cn/oidc"
 	BootstrapURL   = "https://id.ustc.edu.cn/ai/api/v1/bootstrap"
+	UsageURL       = "https://id.ustc.edu.cn/ai/api/v1/usage"
 	APIBase        = "https://api.llm.ustc.edu.cn/v1"
 	CampusCheckURL = "https://id.ustc.edu.cn/doc/claude/netcheck"
 )

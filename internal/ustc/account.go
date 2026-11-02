@@ -127,11 +127,12 @@ type Service struct {
 	accounts     map[string]*cachedAccount
 	identity     *http.Client
 	bootstrapURL string
+	usageURL     string
 	apiClient    func(string) *http.Client
 }
 
 func NewService(config Config) *Service {
-	return &Service{Config: config, Network: NewNetwork(config), accounts: map[string]*cachedAccount{}, identity: HTTPClient(""), bootstrapURL: BootstrapURL, apiClient: HTTPClient}
+	return &Service{Config: config, Network: NewNetwork(config), accounts: map[string]*cachedAccount{}, identity: HTTPClient(""), bootstrapURL: BootstrapURL, usageURL: UsageURL, apiClient: HTTPClient}
 }
 
 func (service *Service) Close() { service.Network.Close(); service.identity.CloseIdleConnections() }
@@ -165,6 +166,25 @@ func (service *Service) Resolve(ctx context.Context, account Account) (Gateway, 
 		}
 		return Gateway{Base: strings.TrimRight(account.APIBase, "/"), Key: key}, account, nil
 	}
+	current, err := service.oauthAccount(ctx, entry, account)
+	if err != nil {
+		return Gateway{}, current, err
+	}
+	if time.Now().Before(entry.gateway.RefreshAt) {
+		return entry.gateway, current, nil
+	}
+	gateway, err := service.bootstrap(ctx, current)
+	if err != nil {
+		entry.gateway = Gateway{}
+		return Gateway{}, current, err
+	}
+	entry.gateway = gateway
+	return gateway, current, nil
+}
+
+// oauthAccount shares token rotation between inference and quota queries. The
+// caller holds entry.mu until its identity request completes, including errors.
+func (service *Service) oauthAccount(ctx context.Context, entry *cachedAccount, account Account) (Account, error) {
 	current := entry.account
 	// A newer login must supersede an older cached refresh token for the same subject.
 	if account.ExpiresAt.After(current.ExpiresAt) && account.AccessToken != current.AccessToken {
@@ -177,21 +197,12 @@ func (service *Service) Resolve(ctx context.Context, account Account) (Gateway, 
 	if time.Until(current.ExpiresAt) < time.Minute {
 		updated, err := service.refresh(ctx, current)
 		if err != nil {
-			return Gateway{}, current, err
+			return current, err
 		}
 		entry.account = updated
 		current = updated
 	}
-	if time.Now().Before(entry.gateway.RefreshAt) {
-		return entry.gateway, current, nil
-	}
-	gateway, err := service.bootstrap(ctx, current)
-	if err != nil {
-		entry.gateway = Gateway{}
-		return Gateway{}, current, err
-	}
-	entry.gateway = gateway
-	return gateway, current, nil
+	return current, nil
 }
 
 func (service *Service) bootstrap(ctx context.Context, account Account) (Gateway, error) {
