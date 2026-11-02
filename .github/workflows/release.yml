@@ -1,6 +1,12 @@
 name: release
 
 on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to build without moving the tag
+        required: true
+        type: string
   push:
     tags:
       - 'v*'
@@ -9,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.release_tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -30,6 +36,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
       - name: Install packaging and smoke test tools
         run: apt-get update && apt-get install -y --no-install-recommends python3 zip openssl
       - name: Test and build
@@ -37,6 +45,7 @@ jobs:
           EXPECTED_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           test "$(go env GOARCH)" = "$EXPECTED_ARCH"
           make test check build
       - name: Build pinned reference CPA host
@@ -52,7 +61,7 @@ jobs:
         run: python3 tests/native_smoke.py
       - name: Package and verify release version
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
           RELEASE_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
@@ -75,6 +84,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -88,7 +99,7 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
           gh release create "$RELEASE_TAG" dist/ustc_*_linux_*.zip dist/checksums.txt \
