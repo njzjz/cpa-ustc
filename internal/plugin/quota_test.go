@@ -41,8 +41,22 @@ func TestQuotaRPCPersistsRotationEvenOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, failUsage := range []bool{false, true} {
-		t.Run(map[bool]string{false: "success", true: "failure"}[failUsage], func(t *testing.T) {
+	partialBody, err := os.ReadFile("../ustc/testdata/usage-partial.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name      string
+		body      []byte
+		failUsage bool
+		groups    int
+		metrics   int
+	}{
+		{"success", body, false, 2, 3},
+		{"fresh partial", partialBody, false, 1, 2},
+		{"failure", nil, true, 0, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 				writer.Header().Set("Content-Type", "application/json")
 				switch request.URL.Path {
@@ -54,12 +68,12 @@ func TestQuotaRPCPersistsRotationEvenOnFailure(t *testing.T) {
 					if request.Header.Get("Authorization") != "Bearer rotated-access" {
 						t.Error("usage did not use rotated identity token")
 					}
-					if failUsage {
+					if test.failUsage {
 						writer.WriteHeader(503)
 						_, _ = io.WriteString(writer, "rotated-access must not leak")
 						return
 					}
-					_, _ = writer.Write(body)
+					_, _ = writer.Write(test.body)
 				default:
 					t.Errorf("quota queried an unexpected endpoint: %s", request.URL.Path)
 					writer.WriteHeader(404)
@@ -91,7 +105,7 @@ func TestQuotaRPCPersistsRotationEvenOnFailure(t *testing.T) {
 			account := ustc.Account{Type: "ustc", ID: "ustc-sso-quota", AccessToken: "old-access", RefreshToken: "old-refresh", Issuer: ustc.Issuer, Subject: "test-subject", ClientID: "tokenworks", ExpiresAt: time.Now().Add(-time.Minute), CPAFields: map[string]json.RawMessage{"priority": json.RawMessage("9"), "disabled": json.RawMessage("true")}}
 			storage, _ := json.Marshal(account)
 			response := invoke(t, runtime, "quota.fetch", map[string]any{"auth_index": "test-index", "auth_id": account.ID, "provider": "ustc", "storage_json": storage})
-			if response["ok"] != !failUsage {
+			if response["ok"] != !test.failUsage {
 				t.Fatal(response)
 			}
 			if saved["refresh_token"] != "rotated-refresh" || saved["priority"] != float64(9) || saved["disabled"] != true {
@@ -101,9 +115,9 @@ func TestQuotaRPCPersistsRotationEvenOnFailure(t *testing.T) {
 			if strings.Contains(string(encoded), "rotated-access") || strings.Contains(string(encoded), "rotated-refresh") {
 				t.Fatal("quota response leaked credential")
 			}
-			if !failUsage {
+			if !test.failUsage {
 				quota := response["result"].(map[string]any)
-				if len(quota["groups"].([]any)) != 2 || len(quota["summary"].([]any)) != 3 {
+				if len(quota["groups"].([]any)) != test.groups || len(quota["summary"].([]any)) != test.metrics {
 					t.Fatal("normalized quota did not survive RPC encoding")
 				}
 			}

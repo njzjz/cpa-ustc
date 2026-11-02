@@ -67,6 +67,16 @@ const { chromium } = require(process.env.CPA_USTC_PLAYWRIGHT_MODULE || "playwrig
     assert.equal(await row.locator("img").count(), 0);
     assert.equal(await page.evaluate(() => window.quotaInjected), undefined);
     await page.unroute(quotaURL);
+
+    await page.route(quotaURL, (route) => route.fulfill({ json: { groups: [{ displayName: "API Key 限额", buckets: [
+      { window: "3h", remainingFraction: 0.6, description: "仅部分额度快照可用，未展示部分状态未知" },
+      { window: "12h", remainingFraction: 0.01, description: "仅部分额度快照可用，未展示部分状态未知" },
+    ] }] } }));
+    await row.getByRole("button", { name: "查询额度", exact: true }).click();
+    await row.getByText(/API Key 限额 3h：剩余 60.0%/).waitFor();
+    assert.equal(await row.getByText(/未展示部分状态未知/).count(), 2);
+    assert(!(await row.textContent()).includes("24h"));
+    await page.unroute(quotaURL);
     await row.getByRole("button", { name: "禁用", exact: true }).click();
     await row.getByRole("button", { name: "启用", exact: true }).waitFor();
     await row.getByRole("button", { name: "启用", exact: true }).click();

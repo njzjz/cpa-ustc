@@ -83,14 +83,60 @@ func TestQuotaNeverInventsUnknownBalances(t *testing.T) {
 			test.edit(root, key, window)
 			body, _ := json.Marshal(root)
 			quota, err := parseQuota(body)
-			if err == nil || len(quota.Groups) != 0 || len(quota.Summary) != 0 {
-				t.Fatalf("unknown quota became usable: %+v, %v", quota, err)
+			switch test.name {
+			case "pending", "stale freshness", "disabled", "unavailable", "too many windows":
+				if err == nil || len(quota.Groups) != 0 || len(quota.Summary) != 0 {
+					t.Fatalf("unusable document became usable: %+v, %v", quota, err)
+				}
+			case "unknown shared spend":
+				if err != nil || len(quota.Groups) != 1 || len(quota.Groups[0].Buckets) != 2 || len(quota.Summary) != 2 {
+					t.Fatalf("unknown account spend hid healthy key windows: %+v, %v", quota, err)
+				}
+			default:
+				if err != nil || len(quota.Groups) != 2 || len(quota.Groups[0].Buckets) != 1 || quota.Groups[0].Buckets[0].Window != "12h" || len(quota.Summary) != 2 || quota.Summary[0].Value != 65.75 {
+					t.Fatalf("bad window was shown or healthy windows were hidden: %+v, %v", quota, err)
+				}
+			}
+			for _, group := range quota.Groups {
+				for _, bucket := range group.Buckets {
+					if !strings.Contains(bucket.Description, "未展示部分状态未知") {
+						t.Fatal("omitted window was not disclosed")
+					}
+				}
 			}
 		})
 	}
 	for _, body := range []string{`null`, `{}`, `{"key":null}`, `{"key":{}} trailing`, `{"key":[]}`} {
 		if _, err := parseQuota([]byte(body)); err == nil {
 			t.Fatalf("accepted %s", body)
+		}
+	}
+}
+
+func TestQuotaFreshPartialSnapshot(t *testing.T) {
+	body, err := os.ReadFile("testdata/usage-partial.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	quota, err := parseQuota(body)
+	if err != nil || len(quota.Groups) != 1 || len(quota.Groups[0].Buckets) != 2 || len(quota.Summary) != 2 {
+		t.Fatalf("fresh partial key snapshot rejected: %+v, %v", quota, err)
+	}
+	if quota.Summary[0].Value != 18 || quota.Summary[1].Value != 0.5 || quota.Groups[0].Buckets[0].RemainingFraction != 0.6 {
+		t.Fatalf("partial snapshot invented or changed a balance: %+v", quota)
+	}
+	for _, bucket := range quota.Groups[0].Buckets {
+		if !strings.Contains(bucket.Description, "未展示部分状态未知") || bucket.Window == "24h" {
+			t.Fatal("unknown account spend was shown as known")
+		}
+	}
+	for _, variant := range []string{
+		strings.Replace(string(body), `"error_code": "snapshot_incomplete"`, `"error_code": "snapshot_stale"`, 1),
+		strings.Replace(string(body), `"freshness": "fresh"`, `"freshness": "stale"`, 1),
+		strings.ReplaceAll(string(body), `"status": "ok"`, `"status": "unavailable"`),
+	} {
+		if quota, err := parseQuota([]byte(variant)); err == nil || len(quota.Groups) != 0 || len(quota.Summary) != 0 {
+			t.Fatalf("unusable partial snapshot became a balance: %+v, %v", quota, err)
 		}
 	}
 }

@@ -1,0 +1,46 @@
+{
+  "status": "partial",
+  "as_of": "2026-11-02T12:21:26+00:00",
+  "data_updated_at": "2026-11-02T12:20:32+00:00",
+  "freshness": "fresh",
+  "key": {
+    "name": "test-only",
+    "status": "active",
+    "usage_status": "partial",
+    "error_code": "snapshot_incomplete",
+    "freshness": "fresh",
+    "budget_windows": [
+      {
+        "budget_duration": "3h",
+        "max_budget": 30,
+        "current_spend": 12,
+        "remaining_budget": 18,
+        "reset_at": "2026-11-02T13:00:00+00:00",
+        "status": "ok",
+        "limit_status": "limited"
+      },
+      {
+        "budget_duration": "12h",
+        "max_budget": "70",
+        "current_spend": "69.5",
+        "remaining_budget": "0.5",
+        "reset_at": "2026-11-02T16:00:00+00:00",
+        "status": "ok",
+        "limit_status": "limited"
+      }
+    ]
+  },
+  "account": {
+    "scope": "key",
+    "shared": false,
+    "budget_duration": "24h",
+    "max_budget": 100,
+    "spend": null,
+    "remaining_budget": null,
+    "reset_at": "2026-11-02T16:00:00+00:00",
+    "status": "unavailable",
+    "error_code": "snapshot_incomplete",
+    "freshness": "fresh",
+    "limit_status": "limited"
+  }
+}

@@ -127,21 +127,27 @@ func parseQuota(body []byte) (Quota, error) {
 		return Quota{}, errors.New("学校额度响应格式无效")
 	}
 	unavailable := errors.New("学校额度快照尚未就绪、已过期或同步异常，请稍后重试；未知余额不会显示为零")
-	if (document.Status != "ok" && document.Status != "partial") || (document.Freshness != "" && document.Freshness != "fresh") || !usageReady(document.Key.UsageStatus, document.Key.ErrorCode, document.Key.Freshness) {
+	// snapshot_incomplete is an aggregate warning, not proof that every window
+	// is unusable. The live service can return fresh, valid key windows while
+	// the account's spend is null; validate each window independently below.
+	partialKey := document.Key.UsageStatus == "partial" && (document.Key.ErrorCode == "" || document.Key.ErrorCode == "snapshot_incomplete") && (document.Key.Freshness == "" || document.Key.Freshness == "fresh")
+	if (document.Status != "ok" && document.Status != "partial") || (document.Freshness != "" && document.Freshness != "fresh") || (!usageReady(document.Key.UsageStatus, document.Key.ErrorCode, document.Key.Freshness) && !partialKey) {
 		return Quota{}, unavailable
 	}
 	if document.Key.Status != "" && document.Key.Status != "active" {
 		return Quota{}, errors.New("学校额度关联的 Key 已停用或不可用，请到学校平台检查账号")
 	}
 	var result Quota
-	appendGroup := func(name, prefix string, windows []usageWindow, account bool) error {
+	partial := document.Status == "partial" || partialKey
+	appendGroup := func(name, prefix string, windows []usageWindow, account bool) {
 		group := QuotaGroup{DisplayName: name}
 		for index, window := range windows {
 			if window.LimitStatus == "unlimited" {
 				continue
 			}
 			if !usageReady(window.Status, window.ErrorCode, window.Freshness) {
-				return unavailable
+				partial = true
+				continue
 			}
 			spendRaw := window.Spend
 			if account {
@@ -151,13 +157,11 @@ func parseQuota(body []byte) (Quota, error) {
 			spend, spendKnown := budgetNumber(spendRaw)
 			duration := strings.ToLower(strings.TrimSpace(window.Duration))
 			if !limitKnown || limit <= 0 || !spendKnown || spend < 0 || len(duration) > 24 || !budgetDuration.MatchString(duration) {
-				return unavailable
+				partial = true
+				continue
 			}
 			remaining := limit - spend
 			description := fmt.Sprintf("已用 %g / %g；剩余 %g（平台计费额度，非 token 数）", spend, limit, remaining)
-			if document.Status == "partial" {
-				description += "；仅部分额度快照可用，未展示部分状态未知"
-			}
 			if updated := budgetTime(document.UpdatedAt); updated != "" {
 				description += "；快照更新于 " + updated
 			}
@@ -173,11 +177,8 @@ func parseQuota(body []byte) (Quota, error) {
 		if len(group.Buckets) > 0 {
 			result.Groups = append(result.Groups, group)
 		}
-		return nil
 	}
-	if err := appendGroup("API Key 限额", "key", document.Key.Windows, false); err != nil {
-		return Quota{}, err
-	}
+	appendGroup("API Key 限额", "key", document.Key.Windows, false)
 	if document.Account != nil {
 		name := "账户额度"
 		if document.Account.Shared {
@@ -193,12 +194,20 @@ func parseQuota(body []byte) (Quota, error) {
 			}
 			name += "额度"
 		}
-		if err := appendGroup(name, "account", []usageWindow{*document.Account}, true); err != nil {
-			return Quota{}, err
-		}
+		appendGroup(name, "account", []usageWindow{*document.Account}, true)
 	}
 	if len(result.Groups) == 0 {
+		if partial {
+			return Quota{}, unavailable
+		}
 		return Quota{}, errors.New("学校未返回可显示的有限额度窗口，可能未限额；请到学校平台确认")
+	}
+	if partial {
+		for groupIndex := range result.Groups {
+			for bucketIndex := range result.Groups[groupIndex].Buckets {
+				result.Groups[groupIndex].Buckets[bucketIndex].Description += "；仅部分额度快照可用，未展示部分状态未知"
+			}
+		}
 	}
 	return result, nil
 }
