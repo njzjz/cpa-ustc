@@ -21,7 +21,7 @@ import (
 type HostCall func(method string, request any, response any) error
 
 // Repository identifies the plugin source and can be overridden when building a fork.
-var Repository = "https://github.com/njzjz-bot/cpa-ustc"
+var Repository = "https://github.com/njzjz/cpa-ustc"
 
 type rpcRequest struct {
 	ConfigYAML     []byte `json:"config_yaml"`

@@ -1,5 +1,5 @@
 GO ?= go
-REPOSITORY ?= https://github.com/njzjz-bot/cpa-ustc
+REPOSITORY ?= https://github.com/njzjz/cpa-ustc
 CCACHE := $(shell command -v ccache 2>/dev/null)
 HOST_CC := $(shell $(GO) env CC 2>/dev/null)
 ifeq ($(shell uname -s),Darwin)

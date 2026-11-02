@@ -1,0 +1,95 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    container: golang:1.26-bookworm
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packaging and smoke test tools
+        run: apt-get update && apt-get install -y --no-install-recommends python3 zip openssl
+      - name: Test and build
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          test "$(go env GOARCH)" = "$EXPECTED_ARCH"
+          make test check build
+      - name: Build pinned reference CPA host
+        run: |
+          set -euo pipefail
+          host="$RUNNER_TEMP/cpa-host"
+          git init --quiet "$host"
+          git -C "$host" fetch --quiet --depth 1 https://github.com/router-for-me/CLIProxyAPI.git f7331b5197730226829cab32c31fb4ce546ef8fc
+          git -C "$host" checkout --quiet --detach FETCH_HEAD
+          (cd "$host" && go build -trimpath -o "$host/cli-proxy-api" ./cmd/server)
+          echo "CPA_USTC_HOST_BINARY=$host/cli-proxy-api" >> "$GITHUB_ENV"
+      - name: Check native ABI
+        run: python3 tests/native_smoke.py
+      - name: Package and verify release version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${RELEASE_TAG#v}"
+          test "$(dist/cpa-ustc version)" = "cpa-ustc $version"
+          archive="ustc_${version}_linux_${RELEASE_ARCH}.zip"
+          (cd dist && zip -j "$archive" ustc.so)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: dist/ustc_*_linux_*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Generate and verify checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum ustc_*_linux_*.zip > checksums.txt
+          sha256sum --check checksums.txt
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" dist/ustc_*_linux_*.zip dist/checksums.txt \
+            --verify-tag --title "USTC Token Plan $RELEASE_TAG" --notes-file docs/release-notes.md

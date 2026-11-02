@@ -16,7 +16,7 @@
 
 插件只声明 OpenAI Chat Completions 输入/输出，ABI 中的规范格式标识是 **`openai`**；`chat-completions` 为宿主接受的别名，调用插件时会被规范化。Anthropic Messages、Responses 等协议由宿主已有 translator 处理；插件不声称学校网关直接支持这些接口。
 
-宿主要求 `GitHubRepository` 非空；默认填写本项目源码仓库 `https://github.com/njzjz-bot/cpa-ustc`，从 fork 构建时可通过 `REPOSITORY` 参数指定对应仓库，不冒充 CPA 或学校官方项目。
+宿主要求 `GitHubRepository` 非空；默认填写本项目源码仓库 `https://github.com/njzjz/cpa-ustc`，从 fork 构建时可通过 `REPOSITORY` 参数指定对应仓库，不冒充 CPA 或学校官方项目。
 
 ### 网页与号池接入
 

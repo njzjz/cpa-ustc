@@ -16,6 +16,20 @@
 
 ## 快速开始
 
+### 预编译安装包与插件商店
+
+[GitHub Releases](https://github.com/njzjz/cpa-ustc/releases) 提供 `ustc_<版本>_linux_amd64.zip`、`ustc_<版本>_linux_arm64.zip` 和 `checksums.txt`。预编译包支持 **Linux x86_64 / ARM64、glibc 2.36+**，可用于 CPA 官方 Debian Bookworm 容器；不适用于 Alpine / musl。两个架构分别在原生运行器上编译，执行竞态检查和真实 CPA 宿主加载测试。macOS、Windows 和其他架构暂需自行构建，尚无对应的商店安装包。
+
+官方商店收录后，可在 CPA 管理中心的“插件商店”搜索 **USTC Token Plan** 或 **中科大词元计划**并安装。收录前可将本项目的单插件索引添加为 CPA 自定义插件源：
+
+```text
+https://raw.githubusercontent.com/njzjz/cpa-ustc/master/registry.json
+```
+
+也可以下载 zip，核对 `checksums.txt`，将根目录的 `ustc.so` 放入 CPA 插件目录并按 CPA 的插件配置方式启用。不要将 zip 本身当作动态库加载。
+
+安装并启用后，进入“插件 → 中科大词元计划”，按下文“在 CPA 网页中完成设置与登录”操作。**通过商店安装无需命令行辅助程序**；后续命令行步骤仅供从源码构建和手动部署时使用。安装新插件后如未出现菜单，刷新管理页面并检查 CPA 的插件加载状态。
+
 ### 1. 构建
 
 需要 Go 1.23+、C 编译器和 `make`；有 `ccache` 时构建自动复用它。
@@ -26,7 +40,7 @@ make build
 
 Linux 产物为 `dist/cpa-ustc` 和 `dist/ustc.so`；macOS 动态库为 `ustc.dylib`。动态库通过 **`-buildmode=c-shared`** 构建，不是 Go 的 `-buildmode=plugin`，也没有绑定 CPA 的 Go 模块版本。
 
-构建默认写入本项目的源码仓库标识 `https://github.com/njzjz-bot/cpa-ustc`。从自己的 fork 构建时，可用 `make build REPOSITORY=https://github.com/你的账号/你的仓库` 指定对应的插件源码地址。
+构建默认写入本项目的源码仓库标识 `https://github.com/njzjz/cpa-ustc`。从自己的 fork 构建时，可用 `make build REPOSITORY=https://github.com/你的账号/你的仓库` 指定对应的插件源码地址。
 
 **CPA 需要支持原生动态库插件和 Management API / 菜单资源。** 开发时对照的是上游主线提交 `f7331b5197730226829cab32c31fb4ce546ef8fc`，C ABI 1 / RPC schema 6。旧版如果没有 `plugins` 功能，需要先升级。管理中心也需支持插件菜单。已在 Linux 验证构建、动态加载及 Chromium 网页操作；macOS / Windows 的真实登录与网络连接尚未实机验证。
 
