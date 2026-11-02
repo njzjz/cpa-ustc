@@ -38,7 +38,7 @@
 
 管理中心前端对照 `router-for-me/Cli-Proxy-API-Management-Center` 提交 `f154fa9380825c4fe94bc577a9abaa7e505f8875` 的 `src/features/plugins/PluginResourcePage.tsx`、`src/services/api/plugins.ts`：菜单使用普通 iframe，不传递管理密钥。页面要求管理员重新输入一次管理密钥，仅存于闭包内存，不读取或写入 localStorage / sessionStorage。
 
-- 配置：先本地校验，再读取 `/v8/management/config/plugins/configs/ustc`，合并公共字段后 PUT 同一个插件对象，携带 ETag / If-Match；不覆盖其他提供商或插件。
+- 配置：先本地校验，再读取 `/v8/management/config/plugins/configs/ustc`，合并公共字段后 PUT 同一个插件对象，携带 ETag / If-Match；不覆盖其他提供商或插件。宿主以整个配置文件的 SHA-256 为强 ETag；页面只对该已知格式去除代理压缩可能添加的 `W/` 前缀，缺失或未知 ETag 时拒绝无条件写入。HTTP 412 时重新读取并合并最新插件对象，最多尝试 3 次；其他错误不重试，失败不清空表单。此逻辑只属于插件自带设置页，不修改管理中心通用配置弹窗。
 - 科大账号：调用 CPA `/v8/management/oauth/auth-url?provider=ustc` 与 `/oauth/status`，由宿主调用本插件的登录能力并保存 auth。
 - API Key：`host.auth.save` 保存为 `type: ustc` 的原生 auth 文件，宿主即时解析、注册凭据和模型。账号列表只使用 `host.auth.list` 的白名单展示字段。
 - 账号禁用 / 删除：直接使用 CPA `/v8/management/credentials/status` 和 `/credentials`，不维护第二份账号状态，也不实现自定义 scheduler。

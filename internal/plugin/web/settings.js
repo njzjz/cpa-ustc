@@ -28,10 +28,36 @@
     if (version !== connectionVersion) throw new Error("管理连接已改变，请重试");
     const data = await response.json().catch(() => ({}));
     if (version !== connectionVersion) throw new Error("管理连接已改变，请重试");
-    if (!response.ok) throw new Error(response.status === 401 || response.status === 403
-      ? "CPA 管理密钥无效或不允许此地址管理"
-      : typeof data.error === "string" ? data.error : `请求失败（HTTP ${response.status}）`);
+    if (!response.ok) {
+      const error = new Error(response.status === 401 || response.status === 403
+        ? "CPA 管理密钥无效或不允许此地址管理"
+        : typeof data.error === "string" ? data.error : `请求失败（HTTP ${response.status}）`);
+      error.status = response.status;
+      throw error;
+    }
     return { data, etag: response.headers.get("ETag") };
+  }
+
+  async function saveSettings(values) {
+    const path = hostAPI + "/config/plugins/configs/ustc";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const current = await api(path);
+      // CPA tags are SHA-256 hashes of its configuration file. Compression
+      // proxies can add W/ without changing that version identifier. Recover
+      // only this known format; never promote arbitrary weak tags or drop CAS.
+      const version = /^(?:W\/)?("[a-f0-9]{64}")$/.exec(current.etag?.trim() || "");
+      if (!version) throw new Error("CPA 未返回可识别的配置版本 ETag，设置尚未保存。请检查反向代理是否移除或改写 ETag。");
+      const config = current.data.value ?? current.data;
+      try {
+        await api(path, "PUT", { ...config, ...values }, { "If-Match": version[1] });
+        return;
+      } catch (error) {
+        if (error.status !== 412) throw error;
+      }
+      // A 412 applies to the whole CPA file, not just this plugin. Read again
+      // and re-merge so unrelated concurrent edits survive the next attempt.
+    }
+    throw new Error("CPA 配置在保存期间被其他操作修改，设置尚未保存。请稍后重试；当前填写内容已保留。");
   }
 
   function bind(id, event, action) {
@@ -209,10 +235,7 @@
   bind("settings-form", "submit", async () => {
     const values = Object.fromEntries(new FormData(element("settings-form")));
     await api(pluginAPI + "validate", "POST", values);
-    const path = hostAPI + "/config/plugins/configs/ustc";
-    const current = await api(path);
-    const config = current.data.value ?? current.data;
-    await api(path, "PUT", { ...config, ...values }, current.etag ? { "If-Match": current.etag } : {});
+    await saveSettings(values);
     notify("设置已保存到 CPA。配置热更新可能需要几秒；修改网络设置会结束进行中的登录。");
   });
   bind("key-form", "submit", async () => {

@@ -38,6 +38,7 @@ const { chromium } = require(process.env.CPA_USTC_PLAYWRIGHT_MODULE || "playwrig
     }
     assert.equal(settings.config["iwan-server"], "browser-saved-line");
     assert.equal(settings.config["budget-cooldown"], "3h");
+    await require("./settings_web_smoke.cjs")({ page, origin, managementKey });
 
     const label = 'Browser Account <img src=x onerror="window.injected=true">';
     await page.locator('#key-form [name="label"]').fill(label);
