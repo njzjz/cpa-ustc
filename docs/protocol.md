@@ -119,7 +119,7 @@ API Key 模式没有已确认的独立额度查询接口，返回明确的不可
 
 ### 3.1 公开捐献与设备授权
 
-开发版新增默认关闭的 `donation-mode: open` 和 `donation-origin`。使用已公布的 `tokenworks` public client，通过 OIDC discovery 的可信 `device_authorization_endpoint` 初始化 RFC 8628 授权；不猜测私有客户端、不需要 client secret 或自定义回调 URI。设备私密码仅留在服务器内存，浏览器只获取用户验证码和 `id.ustc.edu.cn` 上的授权链接。
+v0.1.3 新增默认关闭的 `donation-mode: open` 和 `donation-origin`。使用已公布的 `tokenworks` public client，通过 OIDC discovery 的可信 `device_authorization_endpoint` 初始化 RFC 8628 授权；不猜测私有客户端、不需要 client secret 或自定义回调 URI。设备私密码仅留在服务器内存，浏览器只获取用户验证码和 `id.ustc.edu.cn` 上的授权链接。
 
 令牌轮询在服务器强制执行 interval、`authorization_pending`、`slow_down`、网络 / 5xx 退避和失效截止时间。成功后验证 RS256/JWKS、issuer、audience / azp、有效期、签发时间、可选 `at_hash`、userinfo subject，并要求可自动刷新的令牌。授权成功仅进入待确认状态，不能自动写入号池。
 
