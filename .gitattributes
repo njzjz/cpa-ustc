@@ -1,0 +1,2 @@
+# Signed protocol fixtures must retain the exact bytes covered by their digests.
+internal/ustc/testdata/** -text
