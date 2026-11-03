@@ -1,12 +1,24 @@
-# 使用独立捐献域名
+# 独立捐献域名与受限网关
 
-v0.1.3 起，捐献页可以通过独立 HTTPS 域名提供，例如 `donate.jinzhezeng.group`。不需要第二个 CPA 实例或额外的 OAuth client；捐献者无需 CPA 管理密钥，管理员仍在原管理界面配置，也不改变 CPA 原生号池。
+本文对应 **v0.1.4 起的独立网关**。v0.1.3 将动态捐献操作挂在公开 CPA resource 路由，不符合商店安全要求；升级后这些旧路径全部返回 404，必须迁移。普通插件设置、推理、既有凭据及 CPA 原生调度不依赖网关，捐献功能仍默认关闭。
 
-推荐使用反向代理：浏览器始终访问捐献域名下的页面和公开接口，由代理转发到现有 CPA。不能仅上传静态 HTML 后跨域请求 CPA；页面使用同源 fetch、host-only Cookie、Fetch Metadata 和 CSRF 校验，不应通过放宽 CORS 或伪造请求头来绕过。
+## 1. 安全边界
 
-## 1. 配置插件
+```text
+捐献者浏览器（无 CPA Key）
+  → HTTPS donate.jinzhezeng.group
+  → Nginx → 127.0.0.1:8320 独立捐献网关
+  → Bearer 管理鉴权 → CPA:8317
+  → POST /v0/management/plugins/ustc/donation/{session,start,poll,confirm}
+```
 
-在原 CPA 管理域名的“中科大词元计划”插件设置页中，开放捐献入口，并将站点源设为 `https://donate.jinzhezeng.group`。对应 CPA YAML 为：
+网关只提供 `/`、`/donate.js`、`/settings.css` 和四个固定 POST 操作；不是任意管理 API 的反向代理。管理密钥仅由服务器私有环境读取，不发给浏览器，不接受客户端 Authorization，不跟随上游重定向。会话、学校授权、单次确认和凭据写入仍在 CPA 插件内，沿用请求作用域、去重及原生号池。
+
+网关进程持有高权限管理密钥，必须作为可信服务隔离部署；限制该进程及其配置的读取权限，不与不可信程序共享环境。不建议将 CPA 管理端口直接开放到公网；跨机器链路必须 HTTPS，或通过可信隧道访问本机管理端口。仅 localhost 允许明文 HTTP。不要把密钥注入公开 Nginx 路径或上传到静态托管平台。
+
+## 2. 配置与启动
+
+在现有 CPA 插件设置页开放入口，将站点源设为 `https://donate.jinzhezeng.group`，或仅修改现有配置中的两个字段：
 
 ```yaml
 plugins:
@@ -16,13 +28,21 @@ plugins:
       donation-origin: https://donate.jinzhezeng.group
 ```
 
-只修改现有插件配置中的这两个字段，不要替换整个 CPA 配置文件。保存并等待热更新后，重新读取设置，公开链接就会指向新域名。
+从对应版本的 Release 下载独立 `cpa-ustc_<版本>_<系统>_<架构>.zip`，或构建源码的 `dist/cpa-ustc`（Windows 为 `.exe`）。安装相同版本的 CPA 插件动态库。
 
-当前只允许一个捐献站点源；配置新域名后，旧 CPA 域名上的捐献接口会拒绝页面请求，捐献者应统一访问新域名。原 CPA 管理界面、管理密钥和已入池账号不受影响。该域名必须属于你，并已配置 DNS 和有效 TLS 证书；本文不自动创建 DNS 或更改线上部署。
+将现有 CPA 管理密钥通过受保护的服务环境文件 / secret manager 注入 `CPA_MANAGEMENT_KEY`，**不要直接在命令行填写其值**，不要使用推理客户端 Key。启动：
 
-## 2. Nginx 反向代理示例
+```bash
+cpa-ustc serve-donations --listen 127.0.0.1:8320 \
+  --cpa-url http://127.0.0.1:8317 \
+  --origin https://donate.jinzhezeng.group
+```
 
-以下示例假定 Nginx 与 CPA 在同一台机器，CPA 监听 `127.0.0.1:8317`，证书由现有证书工具管理。请按实际部署替换上游地址与证书路径；如果 Nginx 在独立容器中，`127.0.0.1` 是容器自身，应改为可达的 CPA 内网地址。
+可用 `--management-key-env <变量名>` 改变环境变量名。默认仅监听 loopback，`--origin` 必须与插件 `donation-origin` 完全一致。请用服务管理器守护进程。若在其他容器 / 主机运行，localhost 指向容器自身；应提供可达的 HTTPS CPA 源，并按 CPA 规则启用远程管理，不能关闭管理鉴权。
+
+## 3. Nginx 示例
+
+假设 Nginx 和网关同机，TLS 证书已由管理员配置：
 
 ```nginx
 server {
@@ -32,50 +52,29 @@ server {
     ssl_certificate /etc/letsencrypt/live/donate.jinzhezeng.group/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/donate.jinzhezeng.group/privkey.pem;
 
-    location = / {
-        return 302 /v0/resource/plugins/ustc/donate;
-    }
-
-    location ~ ^/v0/resource/plugins/ustc/(donate(\.js|/(session|start|poll|confirm))?|settings\.css)$ {
-        limit_except GET { deny all; }
-
-        proxy_pass http://127.0.0.1:8317;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Authorization "";
-        proxy_cache off;
-        proxy_hide_header Cache-Control;
-        add_header Cache-Control "no-store" always;
-    }
-
+    # The gateway enforces its own exact path and method allowlist.
     location / {
-        return 404;
+        proxy_pass http://127.0.0.1:8320;
+        proxy_set_header Host $host;
+        proxy_set_header Authorization "";
+        proxy_read_timeout 70s;
+        client_max_body_size 1k;
+        proxy_cache off;
     }
 }
 ```
 
-根路径跳转到现有资源路径，因此页面内的 JS / CSS 相对地址和 Cookie Path 无需改写。`proxy_pass` 不附带 URI，保留原始资源路径。
+这里**不转发到 CPA**，不改写路径或 Cookie，不设置任何管理密钥。保留 `Origin`、`Sec-Fetch-*`、`X-USTC-Donation-*` 和 Cookie 的真实值。不要伪造浏览器校验头、放宽 CORS 或把整个 CPA 站点映射到捐献域名。
 
-此域名只公开以下路径：
+Cloudflare / CDN 应绕过本站全部响应的缓存，尊重 `Cache-Control: no-store`。建议在反向代理增加全站及 IP 限流，并保留正常轮询频率。域名须由运营者掌控并配置有效 TLS；本项目不自动更改 DNS / 生产配置。
 
-- `/v0/resource/plugins/ustc/donate`
-- `/v0/resource/plugins/ustc/donate.js`
-- `/v0/resource/plugins/ustc/settings.css`
-- `/v0/resource/plugins/ustc/donate/session`
-- `/v0/resource/plugins/ustc/donate/start`
-- `/v0/resource/plugins/ustc/donate/poll`
-- `/v0/resource/plugins/ustc/donate/confirm`
+## 4. 上线与迁移检查
 
-不要转发 `/v0/management`、`/v8/management`、模型调用路径或整个 CPA 站点；捐献者不需要这些权限。保持 `Origin`、`Sec-Fetch-*`、`X-USTC-Donation-*` 和 Cookie 的原始值，不在代理中伪造校验请求头、注入管理密钥或改写 Cookie 域名。
+1. 升级插件及配套 CLI，移除旧 `/v0/resource/plugins/ustc/donate*` 的 CPA 转发配置，运行新网关并配置上述源地址。
+2. 未登录 CPA 的浏览器打开 `https://donate.jinzhezeng.group/`，页面应直接加载并建立会话，不要求 CPA 管理密钥。
+3. 检查 Cookie 为捐献域名 host-only、Path `/api/donation/`、Secure / HttpOnly / SameSite=Strict；JS / CSS 可加载，所有响应 no-store。浏览器网络请求不携带 CPA Authorization。
+4. 网关域名下 `/v8/management/credentials`、`/v0/management/plugins/ustc/state`、`/management.html`、`/v1/models` 应全部 404；CPA 的四个私有捐献 POST 无管理鉴权必须 401 / 403。CPA 旧公开捐献路径即使开放入口也必须 404。
+5. 若会话返回网关 502，由管理员检查 CPA 连通性、管理密钥、插件版本及 donation-mode。不要向捐献者索要管理密钥或关闭 CPA 鉴权。没有浏览器同源校验时的 403 属于正常保护。
+6. 自愿进行真实授权验收时，只在学校页面登录自己的账号，回到本站核对身份并再次确认；单独完成学校登录不得写入号池，可重新认证并确认撤回。
 
-若前方还有 Cloudflare / CDN，需要为以上全部资源和接口配置缓存绕过，不要使用“缓存所有内容”覆盖 `Cache-Control: no-store`。公网部署建议在代理层增加适当限流，保留学校授权轮询所需的正常频率。
-
-## 3. 上线检查
-
-1. 在服务器检查反向代理配置并按既有运维流程重新加载，例如 `nginx -t` 后再 reload；确认 TLS 证书与域名匹配。
-2. 用未登录 CPA 的浏览器打开 `https://donate.jinzhezeng.group/`，应跳转到捐献页并成功建立会话，不要求 CPA 管理密钥。
-3. 检查 JS / CSS 能加载，公开响应不缓存，Cookie 带有 Secure、HttpOnly、SameSite=Strict 且属于捐献域名。会话接口没有有效浏览器校验时返回 403 属于预期行为。
-4. 确认捐献域名下的 `/v8/management/credentials`、`/v0/management/plugins/ustc/state`、`/management.html` 和 `/v1/models` 均返回 404。
-5. 若自愿进行真实授权验收，先阅读授权范围，在学校官方页面登录自己的账号，返回后核对身份，再确认捐献。仅完成学校登录不会立即写入号池；可重新认证并确认撤回。
-
-捐献撤回、记录上限、令牌存储和学校侧权限限制与主 README 中的说明相同。关闭入口不会自动撤回已经加入 CPA 的账号。
+切换 origin 或重载插件会清除进行中的会话，但不改变已入池账号。撤回限制及学校侧权限说明见 README；关闭入口不自动撤回已入池授权。测试仅用本地模拟身份，不登录真实账号或消耗学校模型额度。

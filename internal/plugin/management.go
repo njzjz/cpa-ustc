@@ -21,14 +21,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Management operations remain authenticated. The optional donation portal has
-// its own origin/session/CSRF boundary and exposes no management capabilities.
+// CPA resource handlers serve passive assets only. Every operation, including
+// donation session creation, goes through the host's management authentication.
 //
 //go:embed web/*
 var webAssets embed.FS
 
 const managementPrefix = "/v0/management/plugins/ustc/"
 const resourcePrefix = "/v0/resource/plugins/ustc/"
+const donationManagementPrefix = managementPrefix + "donation/"
 
 func managementRegistration() any {
 	routes := []map[string]string{}
@@ -37,15 +38,14 @@ func managementRegistration() any {
 		{"POST", "accounts"}, {"POST", "oauth/callback"},
 		{"POST", "iwan/login"}, {"POST", "iwan/install"},
 		{"GET", "iwan/job"}, {"POST", "iwan/callback"},
+		{"POST", "donation/session"}, {"POST", "donation/start"},
+		{"POST", "donation/poll"}, {"POST", "donation/confirm"},
 	} {
 		routes = append(routes, map[string]string{"Method": route.method, "Path": managementPrefix + route.path})
 	}
 	return map[string]any{"routes": routes, "resources": []map[string]string{
 		{"Path": "/settings", "Menu": "中科大词元计划", "Description": "网络设置、科大登录、API Key 和 CPA 号池"},
 		{"Path": "/settings.js"}, {"Path": "/settings.css"},
-		{"Path": "/donate"}, {"Path": "/donate.js"},
-		{"Path": "/donate/session"}, {"Path": "/donate/start"},
-		{"Path": "/donate/poll"}, {"Path": "/donate/confirm"},
 	}}
 }
 
@@ -94,8 +94,8 @@ func publicConfig(config ustc.Config) map[string]string {
 }
 
 func (runtime *Runtime) handleManagement(ctx context.Context, service *ustc.Service, request rpcRequest) managementResponse {
-	if request.Path == resourcePrefix+"donate" || request.Path == resourcePrefix+"donate.js" || strings.HasPrefix(request.Path, resourcePrefix+"donate/") {
-		if request.Method != http.MethodGet || runtime.donations == nil || service.Config.DonationMode != "open" {
+	if strings.HasPrefix(request.Path, donationManagementPrefix) {
+		if request.Method != http.MethodPost || runtime.donations == nil || service.Config.DonationMode != "open" {
 			return webError(404, "捐献入口未开放")
 		}
 		return runtime.donations.handle(ctx, runtime.Host, request)

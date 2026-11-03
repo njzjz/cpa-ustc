@@ -19,12 +19,14 @@ type donationStore struct {
 	mu       sync.Mutex
 	files    map[string]json.RawMessage
 	writes   int
+	calls    int
 	failSave bool
 }
 
 func (store *donationStore) host(method string, request any, response any) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.calls++
 	input := request.(map[string]any)
 	if input["host_callback_id"] != "donation-scope" {
 		return errors.New("host callback escaped request scope")
@@ -113,7 +115,7 @@ func (browser *donationBrowser) request(operation string, extra http.Header) man
 		headers[http.CanonicalHeaderKey(name)] = values
 	}
 	service, ctx, _ := browser.runtime.current()
-	response := browser.runtime.handleManagement(ctx, service, rpcRequest{Method: "GET", Path: resourcePrefix + "donate/" + operation, Headers: headers, HostCallbackID: "donation-scope"})
+	response := browser.runtime.handleManagement(ctx, service, rpcRequest{Method: "POST", Path: donationManagementPrefix + operation, Headers: headers, HostCallbackID: "donation-scope"})
 	for _, secret := range []string{"access-private-secret", "refresh-private-secret", "donor-subject", "ustc-donation-donor", "secret host error"} {
 		if strings.Contains(string(response.Body), secret) {
 			browser.testing.Errorf("public response leaked %s", secret)
@@ -311,6 +313,16 @@ func TestDonationDisabledExpiryLimitsAndLifecycle(t *testing.T) {
 	}
 	runtime, store := donatedRuntime(t)
 	now := time.Now()
+	for _, name := range []string{"donate", "donate.js", "donate/session", "donate/start", "donate/poll", "donate/confirm"} {
+		for _, method := range []string{"GET", "POST"} {
+			if callWeb(t, runtime, method, resourcePrefix+name, "").StatusCode != 404 {
+				t.Fatal("dynamic resource route remains exposed", method, name)
+			}
+		}
+	}
+	if store.calls != 0 {
+		t.Fatal("passive resource request invoked privileged host callbacks")
+	}
 	runtime.donations.now = func() time.Time { return now }
 	browser := newDonationBrowser(t, runtime)
 	browser.authorize("donate")
@@ -365,7 +377,7 @@ func TestDonationPoolLimitAndExpiredSessionLockOrdering(t *testing.T) {
 	go func() {
 		service, ctx, _ := runtime.current()
 		finished <- runtime.handleManagement(ctx, service, rpcRequest{
-			Method: "GET", Path: resourcePrefix + "donate/session",
+			Method: "POST", Path: donationManagementPrefix + "session",
 			Headers: http.Header{"Sec-Fetch-Site": {"same-origin"}, "Sec-Fetch-Mode": {"same-origin"}, "X-Ustc-Donation-Origin": {"https://cpa.example"}},
 		})
 	}()

@@ -1,0 +1,98 @@
+name: native desktop builds
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+          - runner: macos-15
+            goos: darwin
+            goarch: arm64
+          - runner: windows-2022
+            goos: windows
+            goarch: amd64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc
+      - name: Select native Windows C compiler
+        if: runner.os == 'Windows'
+        run: echo 'C:\msys64\mingw64\bin' >> "$GITHUB_PATH"
+      - name: Test and build native binaries
+        env:
+          EXPECTED_OS: ${{ matrix.goos }}
+          EXPECTED_ARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '1'
+        run: |
+          set -euo pipefail
+          test "$(go env GOOS)" = "$EXPECTED_OS"
+          test "$(go env GOARCH)" = "$EXPECTED_ARCH"
+          compiler="$(go env CC)"
+          if command -v ccache >/dev/null 2>&1; then
+            export CC="ccache $compiler"
+          fi
+          go test -race ./...
+          go vet ./...
+          mkdir -p dist
+          executable=cpa-ustc
+          extension=dylib
+          if [ "$EXPECTED_OS" = windows ]; then
+            executable=cpa-ustc.exe
+            extension=dll
+          fi
+          go build -trimpath -o "dist/$executable" ./cmd/cpa-ustc
+          go build -trimpath -ldflags '-X cpa-ustc/internal/plugin.Repository=https://github.com/njzjz/cpa-ustc' -buildmode=c-shared -o "dist/ustc.$extension" ./cmd/ustc-plugin
+      - name: Load actual native library and check passive route boundary
+        run: python tests/native_abi_smoke.py
+      - name: Test portable release packager
+        run: python -m unittest discover -s tests -p 'test_package_release.py' -v
+      - name: Validate and package store library and donation gateway CLI
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_OS: ${{ matrix.goos }}
+          RELEASE_ARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          executable=dist/cpa-ustc
+          if [ "$RELEASE_OS" = windows ]; then executable=dist/cpa-ustc.exe; fi
+          version="$("$executable" version)"
+          version="${version#cpa-ustc }"
+          python scripts/package_release.py --tag "${RELEASE_TAG:-v$version}" --goos "$RELEASE_OS" --goarch "$RELEASE_ARCH"
+      - uses: actions/upload-artifact@v4
+        if: inputs.release_tag != ''
+        with:
+          name: ${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.zip
+          if-no-files-found: error

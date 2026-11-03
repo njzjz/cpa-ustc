@@ -124,7 +124,7 @@ const { chromium } = require(process.env.CPA_USTC_PLAYWRIGHT_MODULE || "playwrig
     assert(!JSON.stringify(persisted).includes("native-test-key-b"));
     await page.getByRole("button", { name: "断开并清除密钥", exact: true }).click();
     assert.equal(await page.locator("#workspace").isHidden(), true);
-    await require("./donation_web_smoke.cjs")({ browser, origin });
+    await require("./donation_web_smoke.cjs")({ browser, origin, managementKey });
     assert.deepEqual(errors, []);
     console.log("Browser acceptance passed: configuration, CPA accounts, native quota query/display, cooldown diagnostics, native status/delete, iWAN callback, secret handling.");
   } catch (error) {

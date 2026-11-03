@@ -1,15 +1,44 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { spawn } = require("node:child_process");
+const { once } = require("node:events");
+const net = require("node:net");
+const path = require("node:path");
 
 // Keep CPA session/bootstrap real; mock only the external school authorization
 // boundary so public-portal acceptance never uses real identities or budgets.
-module.exports = async ({ browser, origin }) => {
+module.exports = async ({ browser, origin: cpaOrigin, managementKey }) => {
+  const listener = net.createServer();
+  listener.listen(0, "127.0.0.1");
+  await once(listener, "listening");
+  const port = listener.address().port;
+  await new Promise((resolve) => listener.close(resolve));
+  const origin = `http://127.0.0.1:${port}`;
+  const configPath = cpaOrigin + "/v8/management/config/plugins/configs/ustc";
+  const admin = await browser.newContext({ extraHTTPHeaders: { Authorization: `Bearer ${managementKey}` } });
+  try {
+    const current = await admin.request.get(configPath);
+    assert(current.ok());
+    const data = await current.json();
+    const saved = await admin.request.put(configPath, { headers: { "If-Match": current.headers().etag }, data: {
+      ...(data.value || data), "donation-mode": "open", "donation-origin": origin,
+    } });
+    assert(saved.ok(), `gateway config save failed: ${saved.status()} ${await saved.text()}`);
+    await assertEventually(async () => {
+      const response = await admin.request.get(cpaOrigin + "/v0/management/plugins/ustc/state");
+      return response.ok() && (await response.json()).config["donation-origin"] === origin;
+    });
+  } finally { await admin.close(); }
+  const gateway = spawn(path.resolve("dist", process.platform === "win32" ? "cpa-ustc.exe" : "cpa-ustc"), [
+    "serve-donations", "--listen", `127.0.0.1:${port}`, "--origin", origin, "--cpa-url", cpaOrigin,
+    "--management-key-env", "CPA_USTC_TEST_GATEWAY_KEY",
+  ], { env: { ...process.env, CPA_USTC_TEST_GATEWAY_KEY: managementKey }, stdio: "ignore" });
   const context = await browser.newContext();
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  const prefix = "/v0/resource/plugins/ustc/donate/";
+  const prefix = "/api/donation/";
   let action = "";
   let confirmations = 0;
   let csrf = "";
@@ -21,6 +50,10 @@ module.exports = async ({ browser, origin }) => {
     }
   });
   try {
+    await assertEventually(async () => {
+      const response = await context.request.get(origin + "/");
+      return response.ok();
+    });
     await page.route("**" + prefix + "start", async (route) => {
       const headers = await route.request().allHeaders();
       assert.equal(headers["x-ustc-donation-origin"], origin);
@@ -42,7 +75,7 @@ module.exports = async ({ browser, origin }) => {
       confirmations++;
       await route.fulfill({ json: { status: "done", action, message: action === "withdraw" ? "捐献已撤回" : "捐献成功" } });
     });
-    await page.goto(origin + "/v0/resource/plugins/ustc/donate");
+    await page.goto(origin + "/");
     await page.locator("#donate-start").waitFor({ state: "visible" });
     await page.waitForFunction(() => !document.querySelector("#donate-start").disabled);
     assert.equal(await page.locator("#management-key").count(), 0);
@@ -51,7 +84,7 @@ module.exports = async ({ browser, origin }) => {
     assert(session && session.httpOnly && session.sameSite === "Strict");
     assert(!(await page.evaluate(() => document.cookie)).includes("ustc_donation_dev"));
     const protectedAPI = await context.request.get(origin + "/v8/management/credentials");
-    assert([401, 403].includes(protectedAPI.status()));
+    assert.equal(protectedAPI.status(), 404);
 
     await page.locator("#donate-start").click();
     await page.getByText("请先阅读说明并明确同意模型调用授权。", { exact: true }).waitFor();
@@ -74,6 +107,19 @@ module.exports = async ({ browser, origin }) => {
     const storage = await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } }));
     assert.deepEqual(storage, { local: {}, session: {} });
     assert.deepEqual(errors, []);
-    console.log("Donation browser acceptance passed: anonymous CPA bootstrap, HttpOnly session, consent, device authorization, confirmation, withdrawal, no management access, XSS and storage isolation.");
-  } finally { await context.close(); }
+    console.log("Donation browser acceptance passed: restricted gateway, authenticated CPA bootstrap, HttpOnly session, consent, confirmation, withdrawal, no browser key or management access.");
+  } finally {
+    await context.close();
+    gateway.kill("SIGINT");
+    if (gateway.exitCode === null) await once(gateway, "exit");
+  }
 };
+
+async function assertEventually(check) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    try { if (await check()) return; } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.fail("donation gateway or configuration did not become ready");
+}

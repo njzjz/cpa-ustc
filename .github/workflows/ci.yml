@@ -3,16 +3,34 @@ on: [push, pull_request]
 permissions:
   contents: read
 jobs:
+  desktop:
+    uses: ./.github/workflows/native-desktop.yml
   linux:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
+    env:
+      EXPECTED_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'
           cache: true
-      - run: make test check build
+      - run: |
+          test "$(go env GOARCH)" = "$EXPECTED_ARCH"
+          make test check build
+      - run: python3 tests/native_abi_smoke.py
+      - run: python3 -m unittest discover -s tests -p 'test_package_release.py' -v
+      - name: Validate real native release archives before tagging
+        run: python3 scripts/package_release.py --tag "v$(dist/cpa-ustc version | cut -d' ' -f2)" --goos linux --goarch "$EXPECTED_ARCH"
       - name: Build pinned reference CPA host
         run: |
           host="$RUNNER_TEMP/cpa-host"

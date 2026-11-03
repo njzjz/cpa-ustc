@@ -33,6 +33,9 @@ func run(arguments []string) error {
 		return nil
 	}
 	command := arguments[0]
+	if command == "serve-donations" {
+		return serveDonations(arguments[1:])
+	}
 	if command == "help" || command == "--help" || command == "-h" {
 		usage()
 		return nil
@@ -313,6 +316,7 @@ func usage() {
   doctor        不携带凭据地检查校园网络和 iWAN 安装
   install-iwan  显式安装经过摘要校验的第三方 iWAN 命令行客户端
   iwan-login    登录或更新过期的 iWAN 线路凭据
+  serve-donations  运行独立受限捐献网关，管理密钥仅由服务器环境变量读取
   version       显示插件版本
 
 示例：

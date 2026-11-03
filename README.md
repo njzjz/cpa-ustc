@@ -13,7 +13,7 @@
 - **原生多账号号池**：每个账号都是 CPA 的 `ustc` 提供商凭据；选择、轮询、优先级、禁用和删除沿用 CPA，不另建账号池或调度器。
 - **原生错误与冷却**：HTTP 错误及 HTTP 200 JSON / SSE 内的错误通过插件 ABI 回传状态和重试提示，由 CPA 记录错误及切换账号；`budget_exceeded` 按 429 回传，无重试提示时默认冷却 30 分钟，并防止换模型绕过同一凭据的预算冷却。网页可配置时长、查看 CPA 最近错误和冷却截止时间。
 - **原生额度查询**：统一认证账号接入 CPA 的 quota provider，在原生额度页及插件账号列表查询各预算窗口的剩余比例、余额和重置时间；区分 Key 限额与共享账户，不用本地 token 统计冒充学校余额。
-- **自愿捐献入口**：默认关闭的公开网页，通过学校官方设备授权加入 CPA 原生号池；捐献者不需要任何 CPA 密钥或手动申请 API Key，登录后还需明确确认，可重新认证撤回自己的捐献。
+- **自愿捐献入口**：默认关闭，通过独立受限网关提供公开网页，学校官方设备授权后加入 CPA 原生号池；捐献者不需要任何 CPA 密钥或手动申请 API Key，登录后还需明确确认，可重新认证撤回。
 
 学校账号是否有资格使用服务、可用模型和额度，都以学校返回的结果为准；插件不会绕过权限、额度或 MFA。本项目不是学校官方客户端。
 
@@ -21,7 +21,9 @@
 
 ### 预编译安装包与插件商店
 
-[GitHub Releases](https://github.com/njzjz/cpa-ustc/releases) 提供 `ustc_<版本>_linux_amd64.zip`、`ustc_<版本>_linux_arm64.zip` 和 `checksums.txt`。预编译包支持 **Linux x86_64 / ARM64、glibc 2.36+**，可用于 CPA 官方 Debian Bookworm 容器；不适用于 Alpine / musl。两个架构分别在原生运行器上编译，执行竞态检查和真实 CPA 宿主加载测试。macOS、Windows 和其他架构暂需自行构建，尚无对应的商店安装包。
+[GitHub Releases](https://github.com/njzjz/cpa-ustc/releases) 中 v0.1.4 的发布目标为 **Darwin amd64 / arm64、Linux amd64 / arm64、Windows amd64**，安装包名为 `ustc_<版本>_<系统>_<架构>.zip`，并提供 `checksums.txt`；请以对应版本的实际附件为准。Linux 要求 **glibc 2.36+**，可用于 CPA 官方 Debian Bookworm 容器，不适用于 Alpine / musl。所有平台均使用原生运行器执行竞态检查、构建和实际 ABI 加载；Linux 额外执行真实 CPA 宿主及 Chromium 网页验收。
+
+**v0.1.4 商店审查修复**：发布必须通过五个平台的测试和 ABI 实际加载检查，并校验完整产物集合；v0.1.3 及更早版本仅有 Linux 下载。插件 ZIP 根目录仅包含动态库，独立网关 / 安装 CLI 使用另行发布的 `cpa-ustc_<版本>_<系统>_<架构>.zip`。Windows 凭据使用仅当前用户可访问、禁用继承的 DACL，而非无效的 POSIX chmod。
 
 官方商店收录后，可在 CPA 管理中心的“插件商店”搜索 **USTC Token Plan** 或 **中科大词元计划**并安装。收录前可将本项目的单插件索引添加为 CPA 自定义插件源：
 
@@ -29,7 +31,7 @@
 https://raw.githubusercontent.com/njzjz/cpa-ustc/master/registry.json
 ```
 
-也可以下载 zip，核对 `checksums.txt`，将根目录的 `ustc.so` 放入 CPA 插件目录并按 CPA 的插件配置方式启用。不要将 zip 本身当作动态库加载。
+也可以下载 zip，核对 `checksums.txt`，将根目录的 `ustc.so`（macOS 为 `ustc.dylib`，Windows 为 `ustc.dll`）放入 CPA 插件目录并按 CPA 的插件配置方式启用。不要将 zip 本身当作动态库加载。
 
 安装并启用后，进入“插件 → 中科大词元计划”，按下文“在 CPA 网页中完成设置与登录”操作。**通过商店安装无需命令行辅助程序**；后续命令行步骤仅供从源码构建和手动部署时使用。安装新插件后如未出现菜单，刷新管理页面并检查 CPA 的插件加载状态。
 
@@ -41,7 +43,7 @@ https://raw.githubusercontent.com/njzjz/cpa-ustc/master/registry.json
 make build
 ```
 
-Linux 产物为 `dist/cpa-ustc` 和 `dist/ustc.so`；macOS 动态库为 `ustc.dylib`。动态库通过 **`-buildmode=c-shared`** 构建，不是 Go 的 `-buildmode=plugin`，也没有绑定 CPA 的 Go 模块版本。
+Linux 产物为 `dist/cpa-ustc` 和 `dist/ustc.so`；macOS 动态库为 `ustc.dylib`；Windows 为 `dist/cpa-ustc.exe` 和 `dist/ustc.dll`（需要原生 MinGW GCC）。动态库通过 **`-buildmode=c-shared`** 构建，不是 Go 的 `-buildmode=plugin`，也没有绑定 CPA 的 Go 模块版本。
 
 构建默认写入本项目的源码仓库标识 `https://github.com/njzjz/cpa-ustc`。从自己的 fork 构建时，可用 `make build REPOSITORY=https://github.com/你的账号/你的仓库` 指定对应的插件源码地址。
 
@@ -86,6 +88,8 @@ Linux 产物为 `dist/cpa-ustc` 和 `dist/ustc.so`；macOS 动态库为 `ustc.dy
 ```
 
 `--install-iwan` **显式安装第三方** [ustc-iwan](https://github.com/yyy1mu/ustc-iwan) 的固定版本 `v26.9.1`，校验 GitHub 发布附件的 SHA-256；缺少摘要则拒绝安装。只安装到用户状态目录，不需要 root。已有客户端可用 `--iwan-bin /path/to/iwan-client-oidc` 指定，无需下载。
+
+**供应链信任**：摘要校验只确认下载内容与发布方提供的附件一致，不能证明第三方代码安全，也不能防止发布方账号或构建链被入侵。该程序以当前用户权限执行并接触 iWAN 会话；仅在信任其维护者、审查来源后显式安装。可改用已连接的官方客户端，或由管理员审查并预安装所需二进制。
 
 **首次 iWAN 登录仍需一次人工交互**：上游命令行客户端会输出学校登录链接；浏览器认证后，取消打开 iWAN App 的提示，把页面按钮的 `com.panabit.mobile://...` 回调链接复制回终端。这不是要求手动填写网关配置；后续 CPA 自动复用线路凭据并启动、停止代理。词元工坊账号登录本身使用自动本机回调，不需要复制授权码。
 
@@ -135,9 +139,9 @@ printf '%s' "$USTC_API_KEY" | ./dist/cpa-ustc setup --api-key-stdin \
 - 保护覆盖 HTTP 422 / 429、HTTP 200 JSON 和 SSE 中的 `budget_exceeded`；普通限流保留 CPA 原有策略，不额外给整个凭据套用 30 分钟冷却。
 - 当前宿主插件 ABI 不能传递凭据级错误作用域，因此 CPA 仍按收到错误的模型显示冷却；插件补充阻止其他模型请求上游。预算保护保存在当前插件实例内，重启或修改配置会清除它；CPA 的“重置冷却”不清除此保护，也不会重置学校额度。
 
-## 自愿捐献网页（v0.1.3 起）
+## 自愿捐献网页（v0.1.4 起使用独立网关）
 
-管理员在插件设置中把“公开捐献入口”改为“开放”，填写实际访问的 **HTTPS 站点源**（例如 `https://cpa.example.com`，不含路径），保存后重新读取设置即可看到公开链接。管理员仍需管理密钥；**捐献者不需要**。
+**从 v0.1.3 升级须迁移**：原 `/v0/resource/plugins/ustc/donate*` 路径全部移除，不能继续把 CPA 公开资源当动态 API。管理员需额外运行 `cpa-ustc serve-donations`，在插件设置中开放捐献并填写网关的公开 **HTTPS 站点源**（例如 `https://donate.jinzhezeng.group`，不含路径）。普通插件设置及推理不需要此网关。管理员仍需管理密钥；**捐献者不需要**。
 
 对应的 CPA 插件配置为：
 
@@ -146,12 +150,20 @@ plugins:
   configs:
     ustc:
       donation-mode: open
-      donation-origin: https://cpa.example.com
+      donation-origin: https://donate.jinzhezeng.group
 ```
 
-分享的页面地址为 `/v0/resource/plugins/ustc/donate`，与管理界面同源；仅本机调试允许 `http://127.0.0.1:<port>` / `http://localhost:<port>`。反向代理必须转发此资源前缀，不得缓存 `donate` 及其子路径；不要绕过或移除 CPA 管理 API 的鉴权。启用 CLIProxyAPIHome 等会禁止公开插件资源的宿主模式时，此页面也不可用。
+通过服务器私有环境变量提供 CPA 管理密钥，不要写进网页、命令行参数或公开反向代理配置：
 
-也可使用独立的 HTTPS 域名，例如 `donate.jinzhezeng.group`：将 `donation-origin` 设为 `https://donate.jinzhezeng.group`，在该域名仅反向代理捐献页面、JS / CSS 和公开会话接口到现有 CPA；无需开放跨域或分享管理密钥。管理界面继续使用原域名。当前只允许一个捐献站点源，切换后应统一分享新域名；不能只部署静态 HTML 后跨域请求 CPA。完整配置与检查方法见 [独立捐献域名部署](docs/donation-domain.md)。
+```bash
+# CPA_MANAGEMENT_KEY 由受保护的服务环境配置或 secret manager 注入
+./dist/cpa-ustc serve-donations --origin https://donate.jinzhezeng.group \
+  --listen 127.0.0.1:8320 --cpa-url http://127.0.0.1:8317
+```
+
+分享网关域名的根路径 `/`。网页仅调用同源 `POST /api/donation/{session,start,poll,confirm}`；网关只将这四个操作发送到 CPA 的**已鉴权** `POST /v0/management/plugins/ustc/donation/*`，绝不通用转发管理 API。会话状态和写入仍在 CPA 插件内，请求作用域和原生号池逻辑不变。管理密钥仅存网关进程，浏览器不接收。生产必须 HTTPS，HTTP 仅允许 localhost 调试。
+
+将独立域名反向代理到网关 `127.0.0.1:8320`，而不是 CPA。不能仅托管静态网页后跨域调用；不要放宽 CORS、伪造 Fetch Metadata 或移除管理鉴权。当前只允许一个捐献站点源，详情见 [独立捐献域名部署](docs/donation-domain.md)。
 
 捐献流程：阅读说明并同意 → 打开学校设备授权页面完成统一认证（需要时输入短期设备验证码）→ 回到捐献页核对身份 → **再次确认**后才写入 CPA 号池。无需回调转发、CPA Key、API Key 或捐献邀请码；密码、通行密钥和 MFA 始终由学校页面处理。插件验证 ID Token 签名 / issuer / audience / 时间与 userinfo 身份一致性，再检查学校是否提供模型访问配置，不发推理请求探测权限。
 

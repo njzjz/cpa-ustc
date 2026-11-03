@@ -2,7 +2,7 @@
 
 (() => {
   const element = (identifier) => document.getElementById(identifier);
-  const prefix = "/v0/resource/plugins/ustc/donate/";
+  const prefix = "/api/donation/";
   let csrf = "";
   let confirmation = "";
   let action = "";
@@ -15,7 +15,7 @@
 
   async function request(operation, headers = {}) {
     const response = await fetch(prefix + operation, {
-      method: "GET", mode: "same-origin", credentials: "same-origin", cache: "no-store", redirect: "error",
+      method: "POST", mode: "same-origin", credentials: "same-origin", cache: "no-store", redirect: "error",
       headers: { "X-USTC-Donation-Origin": location.origin, "X-USTC-Donation-CSRF": csrf, ...headers },
     });
     const body = await response.json().catch(() => ({}));

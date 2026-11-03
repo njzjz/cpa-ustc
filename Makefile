@@ -6,6 +6,7 @@ ifeq ($(shell uname -s),Darwin)
   LIBRARY := ustc.dylib
 else ifeq ($(OS),Windows_NT)
   LIBRARY := ustc.dll
+  EXE := .exe
 else
   LIBRARY := ustc.so
 endif
@@ -13,7 +14,7 @@ endif
 .PHONY: build test check clean
 build:
 	mkdir -p dist
-	$(GO) build -trimpath -o dist/cpa-ustc ./cmd/cpa-ustc
+	$(GO) build -trimpath -o dist/cpa-ustc$(EXE) ./cmd/cpa-ustc
 	CGO_ENABLED=1 CC="$(if $(CCACHE),$(CCACHE) ,)$(HOST_CC)" $(GO) build -trimpath -ldflags '-X cpa-ustc/internal/plugin.Repository=$(REPOSITORY)' -buildmode=c-shared -o dist/$(LIBRARY) ./cmd/ustc-plugin
 
 test:

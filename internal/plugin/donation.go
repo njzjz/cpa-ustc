@@ -17,10 +17,9 @@ import (
 
 const donationLifetime = 10 * time.Minute
 
-// donationPortal is a narrowly scoped public capability, not a management proxy.
-// CPA currently exposes only GET resource handlers, so actions require explicit
-// same-origin fetch headers, a host-only cookie and an in-memory CSRF token.
-// Device codes, account IDs and credentials never appear in request URLs.
+// donationPortal runs only behind CPA management authentication. A separate
+// restricted gateway authenticates server-to-server on behalf of donors, while
+// these checks still bind each action to browser origin, session and consent.
 type donationPortal struct {
 	mu       sync.Mutex
 	poolMu   sync.Mutex
@@ -129,7 +128,7 @@ func (portal *donationPortal) session(request rpcRequest, create bool) (*donatio
 	}
 	session := &donationSession{csrf: csrf, expires: now.Add(donationLifetime), state: "idle"}
 	portal.sessions[identifier] = session
-	cookie := &http.Cookie{Name: portal.cookieName(), Value: identifier, Path: resourcePrefix + "donate", HttpOnly: true, Secure: portal.secure, SameSite: http.SameSiteStrictMode, MaxAge: int(donationLifetime.Seconds())}
+	cookie := &http.Cookie{Name: portal.cookieName(), Value: identifier, Path: donationPublicPrefix, HttpOnly: true, Secure: portal.secure, SameSite: http.SameSiteStrictMode, MaxAge: int(donationLifetime.Seconds())}
 	return session, cookie.String(), nil
 }
 
@@ -164,19 +163,8 @@ func donationError(status int, message string) managementResponse {
 }
 
 func (portal *donationPortal) handle(ctx context.Context, host HostCall, request rpcRequest) managementResponse {
-	operation := strings.TrimPrefix(request.Path, resourcePrefix)
-	if operation == "donate" || operation == "donate.js" {
-		name, contentType := "donate.html", "text/html; charset=utf-8"
-		if operation == "donate.js" {
-			name, contentType = "donate.js", "application/javascript; charset=utf-8"
-		}
-		body, _ := webAssets.ReadFile("web/" + name)
-		response := webResponse(200, contentType, body)
-		response.Headers.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
-		response.Headers.Set("Cross-Origin-Opener-Policy", "same-origin")
-		return response
-	}
-	if operation != "donate/session" && operation != "donate/start" && operation != "donate/poll" && operation != "donate/confirm" {
+	operation := strings.TrimPrefix(request.Path, donationManagementPrefix)
+	if operation != "session" && operation != "start" && operation != "poll" && operation != "confirm" {
 		return donationError(404, "接口不存在")
 	}
 	// Fetch Metadata is browser-controlled. Requiring it also rejects cross-site
@@ -184,7 +172,7 @@ func (portal *donationPortal) handle(ctx context.Context, host HostCall, request
 	if request.Headers.Get("Sec-Fetch-Site") != "same-origin" || request.Headers.Get("X-USTC-Donation-Origin") != portal.origin || (request.Headers.Get("Origin") != "" && request.Headers.Get("Origin") != portal.origin) || (request.Headers.Get("Sec-Fetch-Mode") != "same-origin" && request.Headers.Get("Sec-Fetch-Mode") != "cors") {
 		return donationError(403, "仅允许从本站捐献页面发起请求，请检查管理员配置的 donation-origin")
 	}
-	session, cookie, err := portal.session(request, operation == "donate/session")
+	session, cookie, err := portal.session(request, operation == "session")
 	if err != nil {
 		return donationError(429, err.Error())
 	}
@@ -194,7 +182,7 @@ func (portal *donationPortal) handle(ctx context.Context, host HostCall, request
 		session.clear()
 		return donationError(410, "捐献会话已过期，请刷新页面")
 	}
-	if operation == "donate/session" {
+	if operation == "session" {
 		response := donationJSON(200, map[string]any{"csrf": session.csrf, "status": session.state})
 		if cookie != "" {
 			response.Headers.Set("Set-Cookie", cookie)
@@ -205,7 +193,7 @@ func (portal *donationPortal) handle(ctx context.Context, host HostCall, request
 		return donationError(403, "捐献会话校验失败，请刷新页面")
 	}
 	switch operation {
-	case "donate/start":
+	case "start":
 		action := request.Headers.Get("X-USTC-Donation-Action")
 		if (action != "donate" && action != "withdraw") || (action == "donate" && request.Headers.Get("X-USTC-Donation-Consent") != "share") {
 			return donationError(400, "请明确同意模型额度共享，或选择撤回自己的捐献")
@@ -223,7 +211,7 @@ func (portal *donationPortal) handle(ctx context.Context, host HostCall, request
 		session.device, session.state, session.action = device, "pending", action
 		session.message = ""
 		return session.snapshot()
-	case "donate/poll":
+	case "poll":
 		if session.state == "pending" {
 			account, ready, err := portal.poll(ctx, session.device)
 			if err != nil {
@@ -249,7 +237,7 @@ func (portal *donationPortal) handle(ctx context.Context, host HostCall, request
 			}
 		}
 		return session.snapshot()
-	case "donate/confirm":
+	case "confirm":
 		if session.state != "ready" || session.confirm == "" || subtle.ConstantTimeCompare([]byte(request.Headers.Get("X-USTC-Donation-Confirm")), []byte(session.confirm)) != 1 {
 			return donationError(409, "请先完成本次学校认证；每次确认只能执行一次")
 		}

@@ -19,6 +19,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  desktop:
+    uses: ./.github/workflows/native-desktop.yml
+    with:
+      release_tag: ${{ inputs.release_tag || github.ref_name }}
   build:
     strategy:
       fail-fast: false
@@ -58,26 +62,25 @@ jobs:
           (cd "$host" && go build -trimpath -o "$host/cli-proxy-api" ./cmd/server)
           echo "CPA_USTC_HOST_BINARY=$host/cli-proxy-api" >> "$GITHUB_ENV"
       - name: Check native ABI
-        run: python3 tests/native_smoke.py
+        run: |
+          python3 tests/native_abi_smoke.py
+          python3 tests/native_smoke.py
+          python3 -m unittest discover -s tests -p 'test_package_release.py' -v
       - name: Package and verify release version
         env:
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
           RELEASE_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          version="${RELEASE_TAG#v}"
-          test "$(dist/cpa-ustc version)" = "cpa-ustc $version"
-          archive="ustc_${version}_linux_${RELEASE_ARCH}.zip"
-          (cd dist && zip -j "$archive" ustc.so)
+          python3 scripts/package_release.py --tag "$RELEASE_TAG" --goos linux --goarch "$RELEASE_ARCH"
       - uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.arch }}
-          path: dist/ustc_*_linux_*.zip
+          path: dist/*.zip
           if-no-files-found: error
 
   publish:
-    needs: build
+    needs: [build, desktop]
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     permissions:
@@ -91,10 +94,12 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Generate and verify checksums
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
+          python3 scripts/package_release.py --tag "$RELEASE_TAG" --verify-all
           cd dist
-          sha256sum ustc_*_linux_*.zip > checksums.txt
           sha256sum --check checksums.txt
       - name: Publish GitHub release
         env:
@@ -102,5 +107,5 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
-          gh release create "$RELEASE_TAG" dist/ustc_*_linux_*.zip dist/checksums.txt \
+          gh release create "$RELEASE_TAG" dist/*.zip dist/checksums.txt \
             --verify-tag --title "USTC Token Plan $RELEASE_TAG" --notes-file docs/release-notes.md

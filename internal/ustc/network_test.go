@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -115,7 +116,7 @@ func TestPrivateWriteAndInvalidSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stat.Mode().Perm() != 0600 {
+	if runtime.GOOS != "windows" && stat.Mode().Perm() != 0600 {
 		t.Fatalf("unsafe permissions: %v", stat.Mode())
 	}
 	for _, raw := range []string{"http://api.llm.ustc.edu.cn/v1", "https://user:secret@api.llm.ustc.edu.cn/v1", "https://api.llm.ustc.edu.cn/v1?token=secret"} {
@@ -145,7 +146,7 @@ func TestManagedIwanLoginRestartAndCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	stat, err := os.Stat(filepath.Join(config.StateDir, "iwan", "servers.json"))
-	if err != nil || stat.Mode().Perm() != 0600 {
+	if err != nil || runtime.GOOS != "windows" && stat.Mode().Perm() != 0600 {
 		t.Fatalf("line credentials: %v %v", stat, err)
 	}
 	proxy, err := network.Proxy(ctx)

@@ -1,6 +1,6 @@
 # 协议依据与维护说明
 
-核对日期：**2026-11-02（Asia/Shanghai）**。本项目独立实现客户端协议，不复制或保存用户的学校密码。
+核对日期：**2026-11-03（Asia/Shanghai）**。本项目独立实现客户端协议，不复制或保存用户的学校密码。
 
 ## 1. CLIProxyAPI
 
@@ -123,7 +123,11 @@ v0.1.3 新增默认关闭的 `donation-mode: open` 和 `donation-origin`。使�
 
 令牌轮询在服务器强制执行 interval、`authorization_pending`、`slow_down`、网络 / 5xx 退避和失效截止时间。成功后验证 RS256/JWKS、issuer、audience / azp、有效期、签发时间、可选 `at_hash`、userinfo subject，并要求可自动刷新的令牌。授权成功仅进入待确认状态，不能自动写入号池。
 
-公开页面及接口位于 `/v0/resource/plugins/ustc/donate` 前缀。当前 CPA 只提供 GET resource handlers，因此这些非缓存接口使用浏览器控制的同源 Fetch Metadata、与配置匹配的 origin、自定义请求头、host-only HttpOnly / SameSite=Strict Cookie、内存 CSRF 和每次授权独立的一次性确认码；不把任何会话凭据放在 URL，不开放管理接口。CSP 禁止第三方资源和 iframe 嵌入。公开资源回调在请求作用域内使用 `host.auth.list/get/save`，浏览器不能指定账号、文件名或令牌。
+v0.1.4 商店审查修复移除了全部 `/v0/resource/plugins/ustc/donate*` 路径；CPA resource 仅注册静态设置 HTML / JS / CSS。状态机和 `host.auth.list/get/save` 全部在已鉴权的 `POST /v0/management/plugins/ustc/donation/{session,start,poll,confirm}` 中执行，保留请求作用域，不通过公开资源访问宿主能力。
+
+可选的独立 `cpa-ustc serve-donations` 网关提供根页面、两份静态文件及 `POST /api/donation/{session,start,poll,confirm}`。它私有持有服务器环境变量中的 CPA 管理密钥，固定映射四个操作，不接受任意路径、URL、请求体或客户端管理头，不跟随重定向，限制请求/响应大小和超时，不向浏览器返回管理鉴权错误正文。生产链路使用 HTTPS（仅 localhost 允许 HTTP）。
+
+公开请求仍要求浏览器控制的同源 Fetch Metadata、配置匹配的 origin、host-only HttpOnly / SameSite=Strict Cookie、内存 CSRF 和每次授权独立的一次性确认码。网关保留真实 origin 元数据、不伪造校验头；会话 Cookie Path 为 `/api/donation/`。CSP 禁止第三方资源和 iframe 嵌入。浏览器不能指定账号、文件名或令牌，不能访问其他管理 API；操作只在 CPA 内修改原生号池。
 
 新记录只使用经学校验证身份派生的 `ustc-donation-…` ID，且不覆盖普通 SSO 记录或已有捐献设置。自助撤回要求新学校认证及确认，只保存本身份的 `donated` / `donation_revoked` / `disabled` 无令牌记录，并丢弃进程内对应缓存；已发出的请求不可追回。宿主没有 auth delete callback，因此不会伪称已从学校侧撤销 OAuth grant，也不从公开入口调用管理删除 API。
 

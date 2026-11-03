@@ -324,7 +324,7 @@ class NativeSmoke(unittest.TestCase):
         plugins = root / "plugins"
         auth.mkdir(parents=True, exist_ok=True)
         plugins.mkdir()
-        library = "ustc.dylib" if sys.platform == "darwin" else "ustc.so"
+        library = "ustc.dylib" if sys.platform == "darwin" else "ustc.dll" if os.name == "nt" else "ustc.so"
         shutil.copyfile(Path("dist", library), plugins / library)
         (auth / "ustc-key-native.json").write_text(json.dumps(self.account))
         with socket.socket() as listener:
@@ -457,14 +457,21 @@ class NativeSmoke(unittest.TestCase):
                         break
                     time.sleep(0.1)
                 self.assertEqual(state["config"]["iwan-server"], "web-saved-line")
-                with opener.open(request("/v0/resource/plugins/ustc/donate", authenticated=False), timeout=5) as response:
-                    self.assertIn(b"donate.js", response.read())
-                    self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
-                session_path = "/v0/resource/plugins/ustc/donate/session"
+                # CPA resources are passive: enabling donations must not expose
+                # a session machine or credential writes without management auth.
+                for suffix in ("donate", "donate.js", "donate/session", "donate/start", "donate/poll", "donate/confirm"):
+                    with self.assertRaises(urllib.error.HTTPError) as removed:
+                        opener.open(request("/v0/resource/plugins/ustc/" + suffix, authenticated=False), timeout=5)
+                    self.assertEqual(removed.exception.code, 404)
+                session_path = "/v0/management/plugins/ustc/donation/session"
+                for operation in ("session", "start", "poll", "confirm"):
+                    with self.assertRaises(urllib.error.HTTPError) as protected:
+                        opener.open(request("/v0/management/plugins/ustc/donation/" + operation, method="POST", authenticated=False), timeout=5)
+                    self.assertIn(protected.exception.code, (401, 403))
                 with self.assertRaises(urllib.error.HTTPError) as missing_metadata:
-                    opener.open(request(session_path, authenticated=False), timeout=5)
+                    opener.open(request(session_path, method="POST"), timeout=5)
                 self.assertEqual(missing_metadata.exception.code, 403)
-                public_session = request(session_path, authenticated=False)
+                public_session = request(session_path, method="POST")
                 public_session.add_header("Sec-Fetch-Site", "same-origin")
                 public_session.add_header("Sec-Fetch-Mode", "same-origin")
                 public_session.add_header("X-USTC-Donation-Origin", f"http://127.0.0.1:{port}")
@@ -474,7 +481,8 @@ class NativeSmoke(unittest.TestCase):
                 self.assertGreaterEqual(len(session["csrf"]), 40)
                 self.assertIn("HttpOnly", cookie)
                 self.assertIn("SameSite=Strict", cookie)
-                unverified_confirm = request("/v0/resource/plugins/ustc/donate/confirm", authenticated=False)
+                self.assertIn("Path=/api/donation/", cookie)
+                unverified_confirm = request("/v0/management/plugins/ustc/donation/confirm", method="POST")
                 for name, value in {"Sec-Fetch-Site":"same-origin", "Sec-Fetch-Mode":"same-origin", "X-USTC-Donation-Origin":f"http://127.0.0.1:{port}", "Cookie":cookie.split(";", 1)[0], "X-USTC-Donation-CSRF":session["csrf"]}.items():
                     unverified_confirm.add_header(name, value)
                 with self.assertRaises(urllib.error.HTTPError) as unverified:

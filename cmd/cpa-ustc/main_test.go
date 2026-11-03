@@ -10,9 +10,18 @@ import (
 	"cpa-ustc/internal/setup"
 )
 
+// os.UserConfigDir uses different environment variables on each native runner.
+// Keep every setup command isolated from developer and runner configuration.
+func setTestConfigHome(t *testing.T, directory string) {
+	t.Helper()
+	for _, name := range []string{"XDG_CONFIG_HOME", "HOME", "APPDATA"} {
+		t.Setenv(name, directory)
+	}
+}
+
 func TestAPIKeySetupEndToEnd(t *testing.T) {
 	directory := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(directory, "xdg"))
+	setTestConfigHome(t, filepath.Join(directory, "xdg"))
 	t.Setenv("USTC_SETUP_TEST_KEY", "private-key-do-not-store")
 	source := filepath.Join(directory, "source.so")
 	if err := os.WriteFile(source, []byte("test library content"), 0600); err != nil {
@@ -59,7 +68,7 @@ func TestAPIKeySetupEndToEnd(t *testing.T) {
 
 func TestSetupFailsBeforeAuthenticationWithoutLibrary(t *testing.T) {
 	directory := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", directory)
+	setTestConfigHome(t, directory)
 	err := run([]string{"setup", "--plugin-source", filepath.Join(directory, "missing.so"), "--state-dir", filepath.Join(directory, "state")})
 	if err == nil || !strings.Contains(err.Error(), "动态库") {
 		t.Fatalf("missing source not detected early: %v", err)
@@ -71,7 +80,7 @@ func TestSetupFailsBeforeAuthenticationWithoutLibrary(t *testing.T) {
 
 func TestInstallAllowsWebOnlyOnboarding(t *testing.T) {
 	directory := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", directory)
+	setTestConfigHome(t, directory)
 	source := filepath.Join(directory, "source.so")
 	if err := os.WriteFile(source, []byte("test library"), 0600); err != nil {
 		t.Fatal(err)
@@ -92,8 +101,26 @@ func TestInstallAllowsWebOnlyOnboarding(t *testing.T) {
 }
 
 func TestConflictingCredentialFlags(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	setTestConfigHome(t, t.TempDir())
 	if err := run([]string{"login", "--api-key-env", "USTC_KEY", "--api-key-stdin"}); err == nil {
 		t.Fatal("conflicting modes accepted")
+	}
+}
+
+func TestDonationGatewayCLIRejectsInvalidConfiguration(t *testing.T) {
+	t.Setenv("CPA_MANAGEMENT_KEY", "")
+	if err := run([]string{"serve-donations", "--origin", "https://donate.example"}); err == nil {
+		t.Fatal("missing management key accepted")
+	}
+	t.Setenv("CPA_MANAGEMENT_KEY", "server-private-test-key")
+	for _, arguments := range [][]string{
+		{"--origin", "http://donate.example"},
+		{"--origin", "https://donate.example", "--cpa-url", "http://remote.example"},
+		{"--origin", "https://donate.example", "unexpected"},
+	} {
+		err := run(append([]string{"serve-donations"}, arguments...))
+		if err == nil || strings.Contains(err.Error(), "server-private-test-key") {
+			t.Fatal("invalid gateway configuration accepted or key leaked", err)
+		}
 	}
 }

@@ -3,6 +3,7 @@ package setup
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -48,7 +49,7 @@ func TestConfigurePreservesExistingProvidersAndSecrets(t *testing.T) {
 		t.Fatal("backup not byte-for-byte identical")
 	}
 	stat, _ := os.Stat(path)
-	if stat.Mode().Perm() != 0600 {
+	if runtime.GOOS != "windows" && stat.Mode().Perm() != 0600 {
 		t.Fatal("config permissions widened")
 	}
 }

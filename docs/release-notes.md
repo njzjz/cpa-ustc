@@ -1,11 +1,19 @@
-# USTC Token Plan v0.1.3
+# USTC Token Plan v0.1.4
 
 CLIProxyAPI 原生中科大词元计划提供商插件（`ustc`）。
 
-## 本次更新
+## 商店审查修复
+
+- 补充 Darwin amd64 / arm64、Windows amd64 原生构建与实际 ABI 加载测试，保留 Linux amd64 / arm64 Bookworm 构建；发布前强制校验五个平台、动态库架构、ZIP 根目录及 SHA-256，任一缺失则不发布。
+- **安全迁移**：移除所有 `/v0/resource/plugins/ustc/donate*` 路径，公开 CPA resource 仅提供静态设置资源；捐献状态机及号池回调只在已鉴权的管理 POST 路由执行。
+- 新增独立 `cpa-ustc serve-donations` 受限网关，服务器环境变量私有持有 CPA 管理密钥；捐献者仍只需学校 OAuth，不能访问通用管理 API。新捐献网址为网关根路径。旧 Nginx 转发必须迁移，详见 `docs/donation-domain.md`。
+- 独立 companion CLI ZIP 与插件库 ZIP 分开发布；Windows 私有凭据使用受保护的用户专属 DACL，补充对应测试。
+- 五个平台的测试、实际 ABI 加载及产物完整性是发布门禁；Linux 额外验证真实 CPA 宿主，CI 使用 Chromium 验证管理设置和独立网关。测试使用本地模拟身份与网关，不登录真实学校账号或消耗学校模型额度。发布不表示已被官方商店收录。
+
+## v0.1.3 历史记录（部署方式已被上述修复取代）
 
 - 新增可选的公开捐献网页：捐献者通过学校官方 OAuth 设备授权、核对身份并确认后加入 CPA 原生号池，不需要 CPA 管理密钥、客户端 Key 或手动申请学校 API Key。
-- 捐献入口默认关闭。在插件网页设置中配置 `donation-mode: open` 和实际 HTTPS `donation-origin`，即可分享 `/v0/resource/plugins/ustc/donate`。支持用独立域名反向代理公开资源；仓库提供 `donate.jinzhezeng.group` 的部署示例，不需要放开跨域或管理接口。
+- 捐献入口默认关闭。v0.1.3 原公开资源路由已移除，升级必须按上述方式迁移到独立网关。
 - 支持重新通过学校认证撤回自己的捐献：停用相应凭据并清除令牌及缓存，保留无令牌的停用记录。不会覆盖管理员添加的普通账号，重复捐献也不会覆盖原有禁用状态或优先级。
 - 修复插件设置页保存时的 HTTP 412 / `precondition_failed`：兼容代理对 CPA 配置 ETag 添加 `W/` 前缀；并发修改时重新读取、合并并最多尝试 3 次。缺失或未知 ETag 时拒绝无条件覆盖，失败保留表单内容。此修复不修改 CPA 管理中心自己的通用配置弹窗。
 - 新增设备授权、捐献生命周期及配置版本冲突的回归测试，包含真实 CPA 与浏览器验收；测试不使用真实学校身份或消耗模型额度。
@@ -22,9 +30,9 @@ CLIProxyAPI 原生中科大词元计划提供商插件（`ustc`）。
 
 ## 安装
 
-- 预编译平台：**Linux x86_64 / ARM64、glibc 2.36+**，兼容 CPA 官方 Debian Bookworm 容器；不支持 Alpine / musl。
-- 安装包：`ustc_0.1.3_linux_amd64.zip` 和 `ustc_0.1.3_linux_arm64.zip`，根目录均包含对应架构的 `ustc.so`。
-- 两种架构均在原生运行器上构建，执行 Go 竞态检查、原生 ABI 及真实 CPA 宿主集成测试。
+- 发布平台：**Darwin amd64 / arm64、Linux amd64 / arm64、Windows amd64**。Linux 要求 glibc 2.36+，兼容 CPA 官方 Debian Bookworm 容器，不支持 Alpine / musl。
+- 插件安装包为 `ustc_0.1.4_<goos>_<goarch>.zip`，根目录只有对应的 `ustc.dylib` / `ustc.so` / `ustc.dll`；独立 CLI 另见 `cpa-ustc_0.1.4_<goos>_<goarch>.zip`。
+- 每个平台均在原生运行器执行 Go 竞态检查、vet、构建和实际 ABI 加载。Linux 执行真实 CPA 宿主集成测试；macOS / Windows 的真人学校登录和 iWAN 连接仍未实机验证。
 - `checksums.txt` 包含 zip 的 SHA-256；CPA 插件商店会校验摘要。
 - 商店收录前，可添加自定义插件源 `https://raw.githubusercontent.com/njzjz/cpa-ustc/master/registry.json`；收录后直接在官方商店搜索 USTC Token Plan。
 - 启用插件后，在“插件 → 中科大词元计划”中设置网络并添加账号；不需要额外运行代理或 Web 服务。

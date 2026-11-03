@@ -115,6 +115,12 @@ func (network *Network) Proxy(ctx context.Context) (string, error) {
 	if _, err := os.Stat(filepath.Join(configDir, "servers.json")); err != nil {
 		return "", errors.New("尚未登录 iWAN；请先运行 cpa-ustc setup（或连接官方 iWAN 客户端后重试）")
 	}
+	if err := securePrivateDirectory(configDir); err != nil {
+		return "", err
+	}
+	if err := securePrivatePath(filepath.Join(configDir, "servers.json")); err != nil {
+		return "", err
+	}
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		return "", err
@@ -189,6 +195,10 @@ func (network *Network) Login(ctx context.Context, input io.Reader, output io.Wr
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return err
 	}
+	// Set inheritable Windows ACLs before the helper creates any credentials.
+	if err := securePrivateDirectory(directory); err != nil {
+		return err
+	}
 	command := exec.CommandContext(ctx, network.config.IwanBinary, "--fetch", "--config-dir", directory)
 	command.Stdin = input
 	command.Stdout = output
@@ -196,7 +206,7 @@ func (network *Network) Login(ctx context.Context, input io.Reader, output io.Wr
 	if err := command.Run(); err != nil {
 		return fmt.Errorf("iWAN 登录失败；请安装 iwan-client-oidc，或先连接官方客户端；过期时运行 cpa-ustc iwan-login: %w", err)
 	}
-	return os.Chmod(filepath.Join(directory, "servers.json"), 0600)
+	return securePrivatePath(filepath.Join(directory, "servers.json"))
 }
 
 func (network *Network) stopLocked() {

@@ -81,7 +81,7 @@
     donationLink.hidden = true;
     donationLink.removeAttribute("href");
     if (data.config["donation-mode"] === "open" && data.config["donation-origin"]) {
-      donationLink.href = new URL("/v0/resource/plugins/ustc/donate", data.config["donation-origin"]).href;
+      donationLink.href = new URL("/", data.config["donation-origin"]).href;
       donationLink.hidden = false;
     }
   }

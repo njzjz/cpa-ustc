@@ -14,7 +14,7 @@ import (
 
 const (
 	Provider              = "ustc"
-	Version               = "0.1.3"
+	Version               = "0.1.4"
 	Issuer                = "https://id.ustc.edu.cn/oidc"
 	BootstrapURL          = "https://id.ustc.edu.cn/ai/api/v1/bootstrap"
 	UsageURL              = "https://id.ustc.edu.cn/ai/api/v1/usage"
@@ -71,7 +71,7 @@ func (config Config) Validate() error {
 	}
 	if config.DonationMode == "open" || config.DonationOrigin != "" {
 		origin, err := url.Parse(config.DonationOrigin)
-		if err != nil || origin.Hostname() == "" || origin.User != nil || origin.RawQuery != "" || origin.Fragment != "" || origin.Opaque != "" || (origin.Path != "" && origin.Path != "/") || (origin.Scheme != "https" && !(origin.Scheme == "http" && (origin.Hostname() == "localhost" || origin.Hostname() == "127.0.0.1" || origin.Hostname() == "::1"))) {
+		if err != nil || origin.Hostname() == "" || origin.User != nil || origin.RawQuery != "" || origin.ForceQuery || origin.RawPath != "" || origin.Fragment != "" || origin.Opaque != "" || (origin.Path != "" && origin.Path != "/") || (origin.Scheme != "https" && !(origin.Scheme == "http" && (origin.Hostname() == "localhost" || origin.Hostname() == "127.0.0.1" || origin.Hostname() == "::1"))) {
 			return errors.New("donation-origin must be an HTTPS origin without a path; HTTP is allowed only on localhost for testing")
 		}
 	}
@@ -115,7 +115,7 @@ func WritePrivate(path string, data []byte) error {
 		return err
 	}
 	defer os.Remove(file.Name())
-	if err = file.Chmod(0600); err == nil {
+	if err = securePrivatePath(file.Name()); err == nil {
 		_, err = file.Write(data)
 	}
 	if err == nil {
