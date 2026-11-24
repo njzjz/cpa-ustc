@@ -53,7 +53,7 @@ const { chromium } = require(process.env.CPA_USTC_PLAYWRIGHT_MODULE || "playwrig
     await row.getByRole("button", { name: "查询额度", exact: true }).click();
     await row.getByText(/仅 API Key 无法查询额度/).waitFor();
 
-    const quotaURL = "**/v8/management/plugins/ustc/quota";
+    const quotaURL = "**/v0/management/plugins/ustc/accounts/quota";
     await page.route(quotaURL, async (route) => {
       const body = route.request().postDataJSON();
       assert.equal(typeof body.auth_index, "string");
@@ -80,7 +80,7 @@ const { chromium } = require(process.env.CPA_USTC_PLAYWRIGHT_MODULE || "playwrig
     await page.unroute(quotaURL);
     await page.route(quotaURL, (route) => route.fulfill({
       status: 401,
-      json: { code: "quota_fetch_failed", error: "词元计划登录已失效，请重新添加科大账号" },
+      json: { code: "ustc_quota_error", error: "词元计划登录已失效，请重新添加科大账号" },
     }));
     await row.getByRole("button", { name: "查询额度", exact: true }).click();
     await row.getByText(/请重新添加科大账号/).waitFor();

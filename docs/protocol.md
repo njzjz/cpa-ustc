@@ -102,7 +102,7 @@ scopes: openid profile email offline_access
 
 ### 原生额度提供商
 
-注册 `quota_provider`，实现 `quota.describe` / `quota.fetch` / `quota.reset`；只读查询声明 `supports_reset=false`。CPA 根据账号的 `ustc` 提供商标记原生 `supports_quota`，网页额度功能通过 `POST /v8/management/plugins/ustc/quota` 和 `auth_index` 查询，无需改 CPA 源码。额度 RPC 的 `storage_json` 使用 snake_case，不能沿用执行器的 `StorageJSON` 字段名。
+注册 `quota_provider`，实现 `quota.describe` / `quota.fetch` / `quota.reset`；只读查询声明 `supports_reset=false`。CPA 根据账号的 `ustc` 提供商标记原生 `supports_quota`，插件设置页通过自身的 `POST /v0/management/plugins/ustc/accounts/quota` 和 `auth_index` 查询，复用同一额度实现及 CPA 凭据存储，不依赖宿主改动，也不受原生额度接口将插件错误统一转成 502 的影响。额度 RPC 的 `storage_json` 使用 snake_case，不能沿用执行器的 `StorageJSON` 字段名。
 
 依据同一份官方 `TokenWorks-0.2.106-windows-x64-electron.zip` 中 `@ustc/tokenworks-bootstrap/lib/index.js` 的 `usageUrl` / `fetchUsage()` 和 `@ustc/tokenworks-usage/lib/upstream.js`、`test/fixtures.mjs`：
 

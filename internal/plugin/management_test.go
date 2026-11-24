@@ -90,6 +90,39 @@ func TestWebAPIKeyImportsNativeCPAAccountAndRedactsSecrets(t *testing.T) {
 	}
 }
 
+func TestWebQuotaSeparatesCredentialFailuresFromManagementAuthentication(t *testing.T) {
+	runtime := configuredRuntime(t)
+	for _, test := range []struct {
+		name, credential, message string
+		status                    int
+	}{
+		{"API key", `{"type":"ustc","id":"ustc-key-test","api_base":"https://api.llm.ustc.edu.cn/v1","api_key":"private-credential"}`, "仅 API Key 无法查询额度", http.StatusNotImplemented},
+		{"expired account", `{"type":"ustc","id":"ustc-sso-test","issuer":"https://id.ustc.edu.cn/oidc","client_id":"tokenworks","subject":"test","access_token":"private-credential","expires_at":"2000-01-01T00:00:00Z"}`, "重新添加科大账号", http.StatusUnauthorized},
+		{"other provider", `{"type":"codex","id":"codex-test","api_key":"private-credential"}`, "未找到可查询的科大账号", http.StatusNotFound},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runtime.Host = func(method string, request any, result any) error {
+				payload := request.(map[string]any)
+				if method != "host.auth.get" || payload["auth_index"] != "test-index" || payload["host_callback_id"] != "test-callback" {
+					t.Fatalf("unexpected quota credential lookup: %s", method)
+				}
+				return json.Unmarshal([]byte(`{"json":`+test.credential+`}`), result)
+			}
+			response := callWeb(t, runtime, "POST", managementPrefix+"accounts/quota", `{"auth_index":"test-index"}`)
+			var result map[string]string
+			if response.StatusCode != test.status || json.Unmarshal(response.Body, &result) != nil || !strings.Contains(result["error"], test.message) {
+				t.Fatalf("HTTP %d: %s", response.StatusCode, response.Body)
+			}
+			if strings.Contains(string(response.Body), "private-credential") {
+				t.Fatal("quota error leaked credential")
+			}
+			if test.status != http.StatusNotFound && result["code"] != "ustc_quota_error" {
+				t.Fatal("provider failure is missing its error code")
+			}
+		})
+	}
+}
+
 func TestWebMutationValidation(t *testing.T) {
 	runtime := configuredRuntime(t)
 	for _, body := range []string{`{}`, `{"api_key":"a","api_key_env":"B"}`, `{"api_key":"a","path":"../overwrite"}`, `{"api_key":"a"} {}`, `{"api_key":"a\nb"}`, strings.Repeat("x", 65537)} {

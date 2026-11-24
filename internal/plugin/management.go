@@ -35,7 +35,7 @@ func managementRegistration() any {
 	routes := []map[string]string{}
 	for _, route := range []struct{ method, path string }{
 		{"GET", "state"}, {"POST", "validate"}, {"GET", "accounts"},
-		{"POST", "accounts"}, {"POST", "oauth/callback"},
+		{"POST", "accounts"}, {"POST", "accounts/quota"}, {"POST", "oauth/callback"},
 		{"POST", "iwan/login"}, {"POST", "iwan/install"},
 		{"GET", "iwan/job"}, {"POST", "iwan/callback"},
 		{"POST", "donation/session"}, {"POST", "donation/start"},
@@ -143,6 +143,8 @@ func (runtime *Runtime) handleManagement(ctx context.Context, service *ustc.Serv
 		return webJSON(200, map[string]string{"status": "ok"})
 	case "GET accounts":
 		return runtime.webAccounts(request.HostCallbackID)
+	case "POST accounts/quota":
+		return runtime.webQuota(ctx, service, request)
 	case "POST accounts":
 		var input struct {
 			APIKey    string `json:"api_key"`
@@ -222,6 +224,43 @@ func (runtime *Runtime) handleManagement(ctx context.Context, service *ustc.Serv
 	default:
 		return webError(404, "接口不存在或请求方法不支持")
 	}
+}
+
+// webQuota reports provider errors directly on the plugin's settings page;
+// the host's native quota API remains available to the CPA control panel.
+func (runtime *Runtime) webQuota(ctx context.Context, service *ustc.Service, request rpcRequest) managementResponse {
+	var input struct {
+		AuthIndex string `json:"auth_index"`
+	}
+	if err := decodeWebBody(request, &input); err != nil {
+		return webError(http.StatusBadRequest, err.Error())
+	}
+	authIndex := strings.TrimSpace(input.AuthIndex)
+	if authIndex == "" {
+		return webError(http.StatusBadRequest, "请选择要查询的科大账号")
+	}
+	if runtime.Host == nil {
+		return webError(http.StatusServiceUnavailable, "CPA 凭据存储不可用")
+	}
+	var credential struct {
+		JSON json.RawMessage `json:"json"`
+	}
+	if err := runtime.Host("host.auth.get", map[string]any{"auth_index": authIndex, "host_callback_id": request.HostCallbackID}, &credential); err != nil {
+		return webError(http.StatusNotFound, "未找到可查询的科大账号，请刷新账号列表")
+	}
+	account, err := decodeAccount(credential.JSON)
+	if err != nil {
+		return webError(http.StatusNotFound, "未找到可查询的科大账号，请刷新账号列表")
+	}
+	quota, err := runtime.fetchQuota(ctx, service, account)
+	if err == nil {
+		return webJSON(http.StatusOK, quota)
+	}
+	var upstream *ustc.StatusError
+	if errors.As(err, &upstream) && upstream.Status >= 400 && upstream.Status < 600 {
+		return webJSON(upstream.Status, map[string]string{"code": "ustc_quota_error", "error": upstream.Error()})
+	}
+	return webError(http.StatusBadGateway, "查询学校额度失败，请稍后重试")
 }
 
 // webAccounts projects CPA's credential list, not a separate plugin account pool.

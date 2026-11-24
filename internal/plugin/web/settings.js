@@ -30,7 +30,7 @@
     if (version !== connectionVersion) throw new Error("管理连接已改变，请重试");
     if (!response.ok) {
       const managementAuthFailed = (response.status === 401 || response.status === 403)
-        && data.code !== "quota_fetch_failed";
+        && data.code !== "ustc_quota_error";
       const error = new Error(managementAuthFailed
         ? "CPA 管理密钥无效或不允许此地址管理"
         : typeof data.error === "string" ? data.error : `请求失败（HTTP ${response.status}）`);
@@ -116,7 +116,7 @@
         quota.disabled = true;
         quotaCell.textContent = "查询中…";
         try {
-          const { data } = await api(hostAPI + "/plugins/ustc/quota", "POST", {
+          const { data } = await api(pluginAPI + "accounts/quota", "POST", {
             auth_index: account.auth_index,
           });
           quotaCell.replaceChildren();

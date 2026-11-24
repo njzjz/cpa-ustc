@@ -233,11 +233,7 @@ func (runtime *Runtime) dispatch(method string, request rpcRequest) (any, error)
 		if parseErr != nil {
 			return nil, parseErr
 		}
-		quota, updated, fetchErr := service.FetchQuota(ctx, account)
-		if persistErr := runtime.persistRotated(account, updated); persistErr != nil {
-			return nil, persistErr
-		}
-		return quota, fetchErr
+		return runtime.fetchQuota(ctx, service, account)
 	case "quota.reset":
 		return nil, &ustc.StatusError{Status: 501, Message: "本插件仅查询学校额度，不执行额度重置"}
 	case "management.handle":
@@ -332,6 +328,14 @@ func (runtime *Runtime) dispatch(method string, request rpcRequest) (any, error)
 	default:
 		return nil, fmt.Errorf("unknown method: %s", method)
 	}
+}
+
+func (runtime *Runtime) fetchQuota(ctx context.Context, service *ustc.Service, account ustc.Account) (ustc.Quota, error) {
+	quota, updated, fetchErr := service.FetchQuota(ctx, account)
+	if persistErr := runtime.persistRotated(account, updated); persistErr != nil {
+		return ustc.Quota{}, persistErr
+	}
+	return quota, fetchErr
 }
 
 func (runtime *Runtime) persistRotated(previous, updated ustc.Account) error {
