@@ -1,8 +1,15 @@
-# USTC Token Plan v0.1.4
+# USTC Token Plan v0.1.5
 
 CLIProxyAPI 原生中科大词元计划提供商插件（`ustc`）。
 
-## 商店审查修复
+## v0.1.5 修复
+
+- **iWAN**：手动安装或更新默认选择最新稳定版，仍校验 SHA-256。若旧客户端已保存线路配置，升级后请重新授权一次，以获取新版所需的线路参数。见 [#3](https://github.com/njzjz/cpa-ustc/pull/3)。
+- **模型目录**：保留学校返回的上下文窗口和最大输出 token 元数据；目录标注不代表实测上限。见 [#3](https://github.com/njzjz/cpa-ustc/pull/3)。
+- **DeepSeek Flash**：对受影响的 `deepseek-flash` thinking + `json_object` 请求，保留思考、绕开学校网关的原生 JSON mode，并校验最终正文，不把思考当答案。Chat Completions 和 Responses 支持流式、非流式；严格 `json_schema` 不变。见 [#5](https://github.com/njzjz/cpa-ustc/pull/5)。
+- 已有的科大账号登录和手动导入 API Key 流程不变。独立 API Key 仍由用户在学校平台申请；此版本不自动签发。
+
+## v0.1.4 商店审查修复（升级仍适用）
 
 - 补充 Darwin amd64 / arm64、Windows amd64 原生构建与实际 ABI 加载测试，保留 Linux amd64 / arm64 Bookworm 构建；发布前强制校验五个平台、动态库架构、ZIP 根目录及 SHA-256，任一缺失则不发布。
 - **安全迁移**：移除所有 `/v0/resource/plugins/ustc/donate*` 路径，公开 CPA resource 仅提供静态设置资源；捐献状态机及号池回调只在已鉴权的管理 POST 路由执行。
@@ -31,7 +38,7 @@ CLIProxyAPI 原生中科大词元计划提供商插件（`ustc`）。
 ## 安装
 
 - 发布平台：**Darwin amd64 / arm64、Linux amd64 / arm64、Windows amd64**。Linux 要求 glibc 2.36+，兼容 CPA 官方 Debian Bookworm 容器，不支持 Alpine / musl。
-- 插件安装包为 `ustc_0.1.4_<goos>_<goarch>.zip`，根目录只有对应的 `ustc.dylib` / `ustc.so` / `ustc.dll`；独立 CLI 另见 `cpa-ustc_0.1.4_<goos>_<goarch>.zip`。
+- 插件安装包为 `ustc_0.1.5_<goos>_<goarch>.zip`，根目录只有对应的 `ustc.dylib` / `ustc.so` / `ustc.dll`；独立 CLI 另见 `cpa-ustc_0.1.5_<goos>_<goarch>.zip`。
 - 每个平台均在原生运行器执行 Go 竞态检查、vet、构建和实际 ABI 加载。Linux 执行真实 CPA 宿主集成测试；macOS / Windows 的真人学校登录和 iWAN 连接仍未实机验证。
 - `checksums.txt` 包含 zip 的 SHA-256；CPA 插件商店会校验摘要。
 - 商店收录前，可添加自定义插件源 `https://raw.githubusercontent.com/njzjz/cpa-ustc/master/registry.json`；收录后直接在官方商店搜索 USTC Token Plan。
@@ -46,7 +53,7 @@ CLIProxyAPI 原生中科大词元计划提供商插件（`ustc`）。
 
 ```text
 Coding agent: Codex
-Codex version: codex-cli 0.166.0
-Model: gpt-6.1-sol
+Codex version: codex-cli 0.171.0
+Model: gpt-6.2-sol
 Reasoning effort: xhigh
 ```

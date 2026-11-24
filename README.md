@@ -21,7 +21,7 @@
 
 ### 预编译安装包与插件商店
 
-[GitHub Releases](https://github.com/njzjz/cpa-ustc/releases) 中 v0.1.4 的发布目标为 **Darwin amd64 / arm64、Linux amd64 / arm64、Windows amd64**，安装包名为 `ustc_<版本>_<系统>_<架构>.zip`，并提供 `checksums.txt`；请以对应版本的实际附件为准。Linux 要求 **glibc 2.36+**，可用于 CPA 官方 Debian Bookworm 容器，不适用于 Alpine / musl。所有平台均使用原生运行器执行竞态检查、构建和实际 ABI 加载；Linux 额外执行真实 CPA 宿主及 Chromium 网页验收。
+[GitHub Releases](https://github.com/njzjz/cpa-ustc/releases) 的发布目标为 **Darwin amd64 / arm64、Linux amd64 / arm64、Windows amd64**，安装包名为 `ustc_<版本>_<系统>_<架构>.zip`，并提供 `checksums.txt`；请以对应版本的实际附件为准。Linux 要求 **glibc 2.36+**，可用于 CPA 官方 Debian Bookworm 容器，不适用于 Alpine / musl。所有平台均使用原生运行器执行竞态检查、构建和实际 ABI 加载；Linux 额外执行真实 CPA 宿主及 Chromium 网页验收。
 
 **v0.1.4 商店审查修复**：发布必须通过五个平台的测试和 ABI 实际加载检查，并校验完整产物集合；v0.1.3 及更早版本仅有 Linux 下载。插件 ZIP 根目录仅包含动态库，独立网关 / 安装 CLI 使用另行发布的 `cpa-ustc_<版本>_<系统>_<架构>.zip`。Windows 凭据使用仅当前用户可访问、禁用继承的 DACL，而非无效的 POSIX chmod。
 
